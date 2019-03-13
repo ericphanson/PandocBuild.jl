@@ -1,0 +1,4 @@
+name = "PandocBuild"
+uuid = "676774ac-45b7-11e9-2a08-bd57d3a53c9c"
+authors = ["Eric <5846501+ericphanson@users.noreply.github.com>"]
+version = "0.1.0"
