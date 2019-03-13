@@ -1,6 +1,11 @@
 module PandocBuild
 
+using PandocFilters
+
 export build
+
+
+include("filters.jl")
 
 function get_dir(dir; create=false, basedir)
     path = joinpath(basedir, dir)
