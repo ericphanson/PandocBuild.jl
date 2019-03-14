@@ -1,7 +1,7 @@
 module PandocBuild
 
 # build and possible build targets
-export build, WEB, TEX, PDF, AST, MD, ALL, SLIDES
+export build, watch, WEB, TEX, PDF, AST, MD, ALL, SLIDES
 
 
 
@@ -13,6 +13,7 @@ struct ProcessException <: Exception
     stderr :: String
  end
 
+ # Modified from
 # https://discourse.julialang.org/t/collecting-all-output-from-shell-commands/15592/7
 function communicate(cmd::Cmd; input = nothing)
     inp = Pipe()
@@ -152,8 +153,10 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 # "pandoc-crossref"
               ]
 
-    # these could be combined into 2 total passes for speed,
-    # but are kept separate for clarity, for now.
+    # Most likely at most only two passes of Julia filters are needed, since global state is only used with thmfilter and resolver.
+    # However, it's more clear to keep them separate. If it starts taking a long time to walk the AST, 
+    # this should be refactored. Each filter could declare what tags it needs, and they could be dispached in two stages.
+    # Also, the HTML and latex versions could be done in parallel.
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
     julia_filters_latex = [ unicode_to_latex, 
                         (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
@@ -295,9 +298,23 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 end
 
 
+# Watching and rebuilding
 
 using FileWatching
 
+"""
+Rerun build when files are changed. Can be started via, e.g.
+
+```julia
+watch_task = @async watch(@__DIR__; filename="slides", targets=[SLIDES, MD])
+```
+
+and later killed by
+
+```julia
+Base.throwto(watch_task, InterruptException())
+````
+"""
 function watch(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     while true
         src = get_dir("src"; basedir=dir)
@@ -306,7 +323,5 @@ function watch(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         sleep(1)
     end
 end
-# julia> watch_task = @async PandocBuild.watch(@__DIR__; filename="slides", targets=[SLIDES, MD])
-
 
 end # module
