@@ -38,10 +38,18 @@ function communicate(cmd::Cmd; input = nothing)
 
     close(inp)
     wait(process)
+    so = fetch(stdout)
+    se = fetch(stderr)
+    code = process.exitcode
+
+    code == 0 || begin
+        @error "Error in communicate" cmd
+        throw(ProcessException(code, se))
+    end
     return (
-        stdout = fetch(stdout),
-        stderr = fetch(stderr),
-        code = process.exitcode
+        stdout = so,
+        stderr = se,
+        code = code
     )
 end
 
@@ -68,8 +76,7 @@ end
 
 macro timed_task(name, expr)
     quote
-
-        local n = $name
+        local n = $(esc(name))
         try
             local val, t, _ = Base.@timed $(esc(expr))
             @info "$n finished ($(round(t,digits=3))s)"
@@ -87,6 +94,7 @@ using PandocFilters, JSON
 include("Filters/Envs.jl")
 include("Filters/UnicodeToLatex.jl")
 include("Filters/TikzFilter.jl")
+include("Filters/KaTeXFilter.jl")
 
 # Build targets
 
@@ -127,6 +135,13 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     src = get_dir("src"; basedir=dir)
     buildtools = joinpath(@__DIR__, "deps")
     outputs = get_dir("outputs"; create=true, basedir=dir)
+
+    katex_css = joinpath(dir, "katex.min.css")
+    if !isfile(katex_css)
+        cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"), katex_css)
+        # stupid hack for pandoc relative paths
+        cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"),  joinpath(outputs, "katex.min.css"))
+    end
     tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
     tex_file = joinpath(tex_aux, "$filename.tex")
 
@@ -148,7 +163,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                         thmfilter, 
                         resolver,
                         # use relative image path for html
-                        (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images")
+                        (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
+                        KaTeXFilter
                          ]             
     markdown_extensions = [
                 "+fenced_divs",
@@ -174,7 +190,6 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
         pandoc_latex, pandoc_html = @timed_task "Get AST, apply filters" begin
             out = communicate(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -t json`)
-            out.code == 0 || throw(ProcessException(out.code, out.stderr))
             
             pandoc_AST_latex = JSON.parse(out.stdout);
             pandoc_AST_html = deepcopy(pandoc_AST_latex)
@@ -185,8 +200,11 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
         if AST in targets
             @timed_task "write json" begin
-                open("$outputs/$filename.json", "w") do f
-                    print(f, pandoc_str)
+                open("$outputs/$(filename)_latex.json", "w") do f
+                    print(f, pandoc_latex)
+                end
+                open("$outputs/$(filename)_html.json", "w") do f
+                    print(f, pandoc_html)
                 end
             end
         end
@@ -195,9 +213,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             isdir(joinpath(outputs, "reveal.js")) || throw(error("reveal.js must be in outputs"))
             mkslides = @async let
                 @timed_task "slides" begin
-                    out = communicate(`pandoc -f json -s -t revealjs -V theme=sunblind -o $outputs/$filename.html`; input = pandoc_html)
-                    # out = communicate(`pandoc -f json -s -t revealjs -V revealjs-url=$outputs/reveal.js -V theme=sunblind -o $outputs/$filename.html`; input = pandoc_html)
-                    out.code == 0 || throw(ProcessException(out.code, out.stderr))
+                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind --css=katex.min.css -o $outputs/$filename.html`; input = pandoc_html)
                 end
             end
 
@@ -206,11 +222,10 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             mktex = @async let
                         @timed_task "tex" begin
                         if SLIDES in targets
-                            out = communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = pandoc_latex)
+                            communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = pandoc_latex)
                         else
-                            out = communicate(`pandoc -f json -s -t latex -o $tex_file`; input = pandoc_latex)
+                            communicate(`pandoc -f json -s -t latex -o $tex_file`; input = pandoc_latex)
                         end
-                        out.code == 0 || throw(ProcessException(out.code, out.stderr))
                         end
                     end
         end
@@ -218,8 +233,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if MD in targets
             mkdown = @async let
                         @timed_task "markdown" begin
-                            out = communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = pandoc_latex)
-                            out.code == 0 || throw(ProcessException(out.code, out.stderr))
+                            communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = pandoc_latex)
                         end
                     end
         end
@@ -228,8 +242,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if WEB in targets
             mkhtml = @async let
                     @timed_task "html" begin
-                    out = communicate(`pandoc -f json -s  -t html --katex -o $outputs/$filename.html`; input = pandoc_html)
-                    out.code == 0 || throw(ProcessException(out.code, out.stderr))
+                    # would prefer $katexcss but that messes up relative paths for local webserver
+                    communicate(`pandoc -f json -s  -t html --css=katex.min.css -o $outputs/$filename.html`; input = pandoc_html)
                     end
                 end
         end
@@ -275,6 +289,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         @info "Launched tasks"
     end
     wait.(tikz_tasks)
+    empty!(tikz_tasks)
     @info "Finished all tasks ($(round(t,digits=3))s)"
 
 end

@@ -11,10 +11,10 @@ function tikz2image(tikz_src, filetype, outfile)
                 """ * tikz_src * "\n\\end{document}"
     
     mktikz = @async let
-        @timed_task "tikz $outfile" begin
+        task_str = string("tikz-", hash(tikz_src),".",filetype)
+        @timed_task task_str begin
             mktempdir() do dir
-                    out = communicate(`pdflatex -jobname=tikz -output-directory $dir`; input = doc_str)
-                    out.code == 0 || throw(ProcessException(out.code, out.stderr))
+                    out = communicate(Cmd(`pdflatex -jobname=tikz -output-directory $dir`; dir=dir); input = doc_str)
                     tikzpdf = joinpath(dir, "tikz.pdf")
                     isfile(tikzpdf) || begin
                     println(readdir())
@@ -23,11 +23,9 @@ function tikz2image(tikz_src, filetype, outfile)
                     if filetype == "pdf"
                         mv("$tikzpdf", "$outfile.$filetype")
                     elseif filetype == "svg"
-                        out2 = communicate(`pdf2svg $tikzpdf $outfile.$filetype`)
-                        out2.code == 0 || throw(ProcessException(out2.code, out2.stderr))
+                        communicate(`pdf2svg $tikzpdf $outfile.$filetype`)
                     else
-                        out2 = communicate(`convert $tikzpdf $outfile.$filetype`)
-                        out2.code == 0 || throw(ProcessException(out2.code, out2.stderr))
+                        communicate(`convert $tikzpdf $outfile.$filetype`)
                     end
             end
         end
@@ -54,14 +52,11 @@ function tikzfilter(tag, content, format, meta, imgdir = joinpath(pwd(), "images
             src = string(outfile, ".", filetype)
             if !isfile(src)
                 tikz2image(code, filetype, outfile)
-                @info "Started tikz image $src"
             end
             if !isnothing(rel_imgdir)
                 src = joinpath(rel_imgdir,  string(hash(code), ".", filetype))
             end
             return Para([Image(["", [], []], [], [src, ""])])
-
-
         end
             
     end
