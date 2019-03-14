@@ -97,6 +97,19 @@ include("Filters/UnicodeToLatex.jl")
 include("Filters/TikzFilter.jl")
 include("Filters/KaTeXFilter.jl")
 
+"""
+Many filters do not interact with each other; they act on different elements and often no global information. So it doesn't make sense to walk the AST `n` times to execute `n` filters. We instead group filters into a "staged filter" which walks the AST once, and dispatches various tags to various filters, using a dictionary. We can likely then execute `n` filters using only 1-2 walks of the AST, at the cost of a dictionary lookup.
+"""
+function makeStagedFilter(filter_dict)
+    function f(tag, content, meta, format)
+        if haskey(filter_dict, tag)
+            return filter_dict[tag](tag, content, meta, format)
+        end
+        nothing
+    end
+    return f
+end
+
 # Build targets
 
 @enum BuildTargets WEB TEX PDF AST MD ALL SLIDES
@@ -126,6 +139,7 @@ function normalize_targets(targets, openpdf)
     return targets
 end
 
+
 # The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
@@ -153,21 +167,26 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 # "pandoc-crossref"
               ]
 
-    # Most likely at most only two passes of Julia filters are needed, since global state is only used with thmfilter and resolver.
-    # However, it's more clear to keep them separate. If it starts taking a long time to walk the AST, 
-    # this should be refactored. Each filter could declare what tags it needs, and they could be dispached in two stages.
-    # Also, the HTML and latex versions could be done in parallel.
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
-    julia_filters_latex = [ unicode_to_latex, 
-                        (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
+
+    # latex output only requires one stage.
+    julia_filters_latex = [ makeStagedFilter(Dict(
+                                    "Math" => unicode_to_latex,
+                                    "RawBlock" => (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
+                                    )), 
                          ]
 
-     julia_filters_html = [ unicode_to_latex, 
-                        thmfilter, 
-                        resolver,
+    # HTML output requires two stages. In the first, environments are parsed to build up `envs` which is used for numbering later in `resolver`. We also need `unicode_to_latex` to run before `KaTeXFilter`
+     julia_filters_html = [ makeStagedFilter(Dict(
+                        "Math" => unicode_to_latex, 
+                        "Div" => thmfilter, 
                         # use relative image path for html
-                        (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
-                        KaTeXFilter
+                        "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
+                            )),
+                            makeStagedFilter(Dict(
+                                "RawInline" => resolver,
+                                "Math" => KaTeXFilter
+                            ))
                          ]             
     markdown_extensions = [
                 "+fenced_divs",
@@ -195,6 +214,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             out = communicate(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -t json`)
             
             pandoc_AST_latex = JSON.parse(out.stdout);
+            # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
             pandoc_AST_html = deepcopy(pandoc_AST_latex)
             AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
             AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
