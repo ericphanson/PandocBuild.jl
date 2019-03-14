@@ -24,8 +24,11 @@ end
     return outstr
 end
 
-# The filter
+"""
+Filter to walk the Pandoc AST and replace unicode characters in LaTeX math environments with their corresponding LaTeX commands. Hopefully this is simpler and more robust than trying to get xelatex and katex to both fully cooperate.
 
+    unicode_to_latex(tag, content, meta, format)
+"""
 function unicode_to_latex(tag, content, meta, format)
     if tag == "Math"
         mathtypedict, str = content
