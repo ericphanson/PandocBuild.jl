@@ -23,6 +23,10 @@ struct EnvsLookup{K1, K2, T}
     end
 end
 
+islongname(D::EnvsLookup, key) =haskey(D.longname_lookup, key)
+
+isshortname(D::EnvsLookup, key) =haskey(D.shortname_lookup, key)
+
 function _getidx(D::EnvsLookup, key, whichname :: Names)
     whichname == LONG ? D.longname_lookup[key] : D.shortname_lookup[key]
 end

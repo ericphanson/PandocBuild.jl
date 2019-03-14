@@ -1,18 +1,20 @@
 module PandocBuild
 
-using PandocFilters, JSON
-
-using Logging
-
+# build and possible build targets
 export build, WEB, TEX, PDF, AST, MD, ALL
+
+# Filters
+using PandocFilters, JSON
+include("Filters/Envs.jl")
+include("Filters/UnicodeToLatex.jl")
+
+# Proccess and logging
+using Logging
 
 struct ProcessException <: Exception
     code :: Int
     stderr :: String
  end
-
-
-include("filters.jl")
 
 # https://discourse.julialang.org/t/collecting-all-output-from-shell-commands/15592/7
 function communicate(cmd::Cmd; input = nothing)
@@ -46,7 +48,7 @@ function communicate(cmd::Cmd; input = nothing)
     )
 end
 
-
+# Helpers
 
 function get_dir(dir; create=false, basedir)
     path = joinpath(basedir, dir)
@@ -67,9 +69,6 @@ function get_file(file)
 end
 
 
-const buildname = basename(@__FILE__)
-
-
 macro timed_task(name, expr)
     quote
 
@@ -84,6 +83,9 @@ macro timed_task(name, expr)
         end
     end
 end
+
+
+# Build targets
 
 @enum BuildTargets WEB TEX PDF AST MD ALL
 
@@ -112,6 +114,7 @@ function normalize_targets(targets, openpdf)
     return targets
 end
 
+# The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     
@@ -152,7 +155,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                         end tell
                         EOF""")
     
-    reset!(envs)
+                        
+    reset!(envs) # sneaky reset for the environment numbering (see Filters/Envs.jl)
 
     t = @elapsed @sync begin
 
