@@ -1,12 +1,9 @@
 module PandocBuild
 
 # build and possible build targets
-export build, WEB, TEX, PDF, AST, MD, ALL
+export build, WEB, TEX, PDF, AST, MD, ALL, SLIDES
 
-# Filters
-using PandocFilters, JSON
-include("Filters/Envs.jl")
-include("Filters/UnicodeToLatex.jl")
+
 
 # Proccess and logging
 using Logging
@@ -84,10 +81,16 @@ macro timed_task(name, expr)
     end
 end
 
+# Filters
+
+using PandocFilters, JSON
+include("Filters/Envs.jl")
+include("Filters/UnicodeToLatex.jl")
+include("Filters/TikzFilter.jl")
 
 # Build targets
 
-@enum BuildTargets WEB TEX PDF AST MD ALL
+@enum BuildTargets WEB TEX PDF AST MD ALL SLIDES
 
 function normalize_targets(targets, openpdf)
     if targets isa AbstractSet
@@ -117,7 +120,7 @@ end
 # The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
-    
+    cd(dir)
     targets = normalize_targets(targets, openpdf)
 
     pdf_viewer = "/Applications/Skim.app/Contents/MacOS/Skim"
@@ -136,8 +139,17 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
     # these could be combined into 2 total passes for speed,
     # but are kept separate for clarity, for now.
-    julia_filters = [ unicode_to_latex, thmfilter, resolver ]
-              
+    imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
+    julia_filters_latex = [ unicode_to_latex, 
+                        (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
+                         ]
+
+     julia_filters_html = [ unicode_to_latex, 
+                        thmfilter, 
+                        resolver,
+                        # use relative image path for html
+                        (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images")
+                         ]             
     markdown_extensions = [
                 "+fenced_divs",
                 "+backtick_code_blocks",
@@ -160,13 +172,15 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
     t = @elapsed @sync begin
 
-        pandoc_str = @timed_task "Get AST, apply filters" begin
+        pandoc_latex, pandoc_html = @timed_task "Get AST, apply filters" begin
             out = communicate(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -t json`)
             out.code == 0 || throw(ProcessException(out.code, out.stderr))
             
-            pandoc_AST = JSON.parse(out.stdout);
-            AST_filter!(pandoc_AST, julia_filters);
-            JSON.json(pandoc_AST)
+            pandoc_AST_latex = JSON.parse(out.stdout);
+            pandoc_AST_html = deepcopy(pandoc_AST_latex)
+            AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
+            AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
+            JSON.json(pandoc_AST_latex), JSON.json(pandoc_AST_html)
         end
 
         if AST in targets
@@ -176,22 +190,36 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 end
             end
         end
+
+        if SLIDES in targets
+            isdir(joinpath(outputs, "reveal.js")) || throw(error("reveal.js must be in outputs"))
+            mkslides = @async let
+                @timed_task "slides" begin
+                    out = communicate(`pandoc -f json -s -t revealjs -V theme=sunblind -o $outputs/$filename.html`; input = pandoc_html)
+                    # out = communicate(`pandoc -f json -s -t revealjs -V revealjs-url=$outputs/reveal.js -V theme=sunblind -o $outputs/$filename.html`; input = pandoc_html)
+                    out.code == 0 || throw(ProcessException(out.code, out.stderr))
+                end
+            end
+
+        end
         if TEX in targets
             mktex = @async let
                         @timed_task "tex" begin
-                            out = communicate(`pandoc -f json -s -t latex -o $tex_file`; input = pandoc_str)
-                            out.code == 0 || throw(ProcessException(out.code, out.stderr))
-                            # run(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -s -t latex -o $tex_file`)
+                        if SLIDES in targets
+                            out = communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = pandoc_latex)
+                        else
+                            out = communicate(`pandoc -f json -s -t latex -o $tex_file`; input = pandoc_latex)
+                        end
+                        out.code == 0 || throw(ProcessException(out.code, out.stderr))
                         end
                     end
         end
        
         if MD in targets
             mkdown = @async let
-                        @timed_task "tex" begin
-                            out = communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = pandoc_str)
+                        @timed_task "markdown" begin
+                            out = communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = pandoc_latex)
                             out.code == 0 || throw(ProcessException(out.code, out.stderr))
-                            # run(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -s -t latex -o $tex_file`)
                         end
                     end
         end
@@ -200,10 +228,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if WEB in targets
             mkhtml = @async let
                     @timed_task "html" begin
-                    out = communicate(`pandoc -f json -s  -t html --katex -o $outputs/$filename.html`; input = pandoc_str)
+                    out = communicate(`pandoc -f json -s  -t html --katex -o $outputs/$filename.html`; input = pandoc_html)
                     out.code == 0 || throw(ProcessException(out.code, out.stderr))
-
-                        # run(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -s  -t html --katex -o $outputs/$filename.html`)
                     end
                 end
         end
@@ -211,6 +237,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if PDF in targets
             mkpdf = @async let
                         wait(mktex)
+                        wait.(tikz_tasks)
                         @timed_task "pdf" begin
                             run(pipeline(`latexmk $tex_file -pdf -cd -silent`, stdout=devnull, stderr=devnull))
                             cp(joinpath(tex_aux, "$filename.pdf"), joinpath(outputs, "$filename.pdf"); force=true)
@@ -220,6 +247,10 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         checkerrors = @async let
                     wait(mkpdf)
                         @timed_task "rubber-info" begin
+                            # careful: cd changes global state for other tasks.
+                            # (https://stackoverflow.com/questions/44571713/julia-language-state-in-async-tasks-current-directory)
+                            # since this waits for mkpdf, it runs basically after everything else
+                            # so it's probably fine, but maybe this should be changed.
                             rubber_out = cd(tex_aux) do
                                     read(`rubber-info $(relpath(tex_file))`, String)
                             end
@@ -243,9 +274,24 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
         @info "Launched tasks"
     end
-
+    wait.(tikz_tasks)
     @info "Finished all tasks ($(round(t,digits=3))s)"
 
 end
+
+
+
+using FileWatching
+
+function watch(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
+    while true
+        src = get_dir("src"; basedir=dir)
+        ret = watch_file(joinpath(src,"$filename.md"))
+        build(dir; filename=filename, targets=targets, openpdf=openpdf)
+        sleep(1)
+    end
+end
+# julia> watch_task = @async PandocBuild.watch(@__DIR__; filename="slides", targets=[SLIDES, MD])
+
 
 end # module
