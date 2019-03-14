@@ -4,4 +4,8 @@ authors = ["Eric <5846501+ericphanson@users.noreply.github.com>"]
 version = "0.1.0"
 
 [deps]
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+LaTeX_Entities = "9927f19a-46ce-5bdd-a20a-f46a78b61e3d"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 PandocFilters = "5c63c41c-4435-11e9-15bb-bd4d9305eea5"
+StrTables = "9700d1a9-a7c8-5760-9816-a99fda30bb8f"
