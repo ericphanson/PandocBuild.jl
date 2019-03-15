@@ -3,8 +3,6 @@ module PandocBuild
 # build and possible build targets
 export build, watch, WEB, TEX, PDF, AST, MD, ALL, SLIDES
 
-
-
 # Proccess and logging
 using Logging
 
@@ -81,10 +79,10 @@ macro timed_task(name, expr)
         try
             local val, t, _ = Base.@timed $(esc(expr))
             @info "$n finished ($(round(t,digits=3))s)"
-            val === nothing ? true : val
+            val
         catch E
             @error "$n failed" exception=E
-            false
+            E
         end
     end
 end
@@ -92,6 +90,10 @@ end
 # Filters
 
 using PandocFilters, JSON
+
+# `KaTeXFilter` and `unicode_to_latex` use memoization.
+# I think this should help speed up work on large files,
+# when repeatedly recompiling with few changes. `TikzFilter` has a form of caching; it names files by the hash of the tikz code used to generate them, and doesn't regenerate ones which already exist. That leaves only the theorem numbering filters, which likely can't be memoized or cached easily.
 include("Filters/Envs.jl")
 include("Filters/UnicodeToLatex.jl")
 include("Filters/TikzFilter.jl")
@@ -176,9 +178,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                                     )), 
                          ]
 
-    # HTML output requires two stages. In the first, environments are parsed to build up `envs` which is used for numbering later in `resolver`. We also need `unicode_to_latex` to run before `KaTeXFilter`
+    # HTML output requires two stages. In the first, environments are parsed to build up `envs` which is used for numbering later in `resolver`.
      julia_filters_html = [ makeStagedFilter(Dict(
-                        "Math" => unicode_to_latex, 
                         "Div" => thmfilter, 
                         # use relative image path for html
                         "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
@@ -210,16 +211,19 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
     t = @elapsed @sync begin
 
-        pandoc_latex, pandoc_html = @timed_task "Get AST, apply filters" begin
-            out = communicate(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -t json`)
-            
+        
+        out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -t json`)
+        @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
+
+        ast_time = @elapsed begin
             pandoc_AST_latex = JSON.parse(out.stdout);
             # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
             pandoc_AST_html = deepcopy(pandoc_AST_latex)
             AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
             AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
-            JSON.json(pandoc_AST_latex), JSON.json(pandoc_AST_html)
+            pandoc_latex, pandoc_html = JSON.json(pandoc_AST_latex), JSON.json(pandoc_AST_html)
         end
+        @info  "Parsing and filtering AST finished ($(round(ast_time,digits=3))s)"
 
         if AST in targets
             @timed_task "write json" begin
