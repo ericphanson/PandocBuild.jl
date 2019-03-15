@@ -1,5 +1,7 @@
+# A simple memoization structure.
+
 """
-A simple memoization structure.
+A `DictCache{K,T}(f)` is a replacement for a function `f(x::K)::T` that adds a dictionary-based cache. To treat multi-argument functions, `K` should be a `Tuple` type, and `f` should be written to accept a tuple (possibly by destructuring). These are callable, should be able to be used as a drop-in replacement for `f`.
 """
 struct DictCache{K, T, F}
     dict :: Dict{K,T}
@@ -21,6 +23,3 @@ function (DC::DictCache)(key...)
         return value
     end
 end
-
-# # if you're given multiple arguments, DC.f should accept a tuple.
-# (DC::DictCache)(key...) = DC(key)

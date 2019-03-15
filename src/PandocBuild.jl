@@ -91,9 +91,9 @@ end
 
 using PandocFilters, JSON
 
-# `KaTeXFilter` and `unicode_to_latex` use memoization.
-# I think this should help speed up work on large files,
-# when repeatedly recompiling with few changes. `TikzFilter` has a form of caching; it names files by the hash of the tikz code used to generate them, and doesn't regenerate ones which already exist. That leaves only the theorem numbering filters, which likely can't be memoized or cached easily.
+# `KaTeXFilter` and `unicode_to_latex` use `DictCache` objects to cache katex rendering and unicode conversion, respectively. I think this should help speed up work on large files, when repeatedly recompiling with few changes. 
+# `TikzFilter` has a form of caching; it names files by the hash of the tikz code used to generate them, and doesn't regenerate ones which already exist. That leaves only the theorem numbering filters, which likely can't be memoized or cached easily.
+include("Filters/DictCache.jl")
 include("Filters/Envs.jl")
 include("Filters/UnicodeToLatex.jl")
 include("Filters/TikzFilter.jl")
@@ -125,7 +125,7 @@ function normalize_targets(targets, openpdf)
         targets = Set([targets])
     end
 
-    eltype(targets) == BuildTargets || throw(ArgumentError("targets must be a vector or set of BuildTargets"))
+    eltype(targets) == BuildTargets || throw(ArgumentError("targets must be a single BuiltTargets or a vector or set thereof"))
 
     if ALL in targets
         return Set(instances(BuildTargets))
@@ -161,13 +161,6 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     end
     tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
     tex_file = joinpath(tex_aux, "$filename.tex")
-
-    # Slow!!
-    filters = [
-                # "pandoc-unicode-math",
-                # get_file(joinpath(buildtools, "pandocfilters", "examples", "theorem.py")),
-                # "pandoc-crossref"
-              ]
 
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
 
@@ -212,7 +205,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     t = @elapsed @sync begin
 
         
-        out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from --filter=$filters -t json`)
+        out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
         @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
 
         ast_time = @elapsed begin

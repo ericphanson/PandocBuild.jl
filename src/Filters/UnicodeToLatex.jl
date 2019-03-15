@@ -12,6 +12,9 @@ function to_latex_char(char::AbstractChar)
     "\\" * possibilities[]
 end
 
+"""
+A caching function to replace unicode by latex commands.
+"""
 const to_latex = DictCache{String, String}(
     str::String -> begin
         outstr = ""
