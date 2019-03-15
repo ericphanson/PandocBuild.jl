@@ -2,6 +2,9 @@ using NodeJS
 
 const nodepath = normpath(joinpath(@__DIR__, "..","..", "deps/"))
 
+# Instead of running many processes to parse each expression, I should use the ResolveMe trick to first collect
+# all the unparsed expressions, then parse them all at once in one call to node (caching the results as now), and then
+# resolve them upon deserialization.
 """
 Remove unicode characters (via `to_latex`), then render to KaTeX via node.
 

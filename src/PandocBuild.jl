@@ -176,22 +176,21 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
 
-    # latex output only requires one stage.
-    julia_filters_latex = [ makeStagedFilter(Dict(
+    # We've done a bit of work (see the `Envs.jl` file) so that both for latex and HTML, we only need to walk the AST once to run all our filters, using this `makeStagedFilter` function.
+    julia_filters_latex =   [ makeStagedFilter(Dict(
                                     "Math" => unicode_to_latex,
                                     "RawBlock" => (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
                                     )), 
-                         ]
-
-    # HTML output requires two stages. In the first, environments are parsed to build up `envs` which is used for numbering later in `resolver`.
-     julia_filters_html = [ makeStagedFilter(Dict(
+                            ]
+  
+    julia_filters_html = [ makeStagedFilter(Dict(
                         "Div" => thmfilter, 
                         "RawInline" => resolver, 
                         # use relative image path for html
                         "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
                         "Math" => KaTeXFilter
-                            ))
-                         ]             
+                        ))]
+               
     markdown_extensions = [
                 "+fenced_divs",
                 "+backtick_code_blocks",
