@@ -77,7 +77,9 @@ macro timed_task(name, expr)
     quote
         local n = $(esc(name))
         try
-            @timed_task_throw(name, expr)
+            local val, t, _ = Base.@timed $(esc(expr))
+            @info "$n finished ($(round(t,digits=3))s)"
+            val
         catch E
             @error "$n failed" exception=E
             E
