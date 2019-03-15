@@ -10,10 +10,24 @@ const envs = EnvsLookup{Symbol, Symbol, Dict{String, Int}}([
     (:remark, :rem)
     ])
 
+
+
 # Make `envs` implicit for convenience
 other_name(key, whichname) = other_name(envs, key, whichname)
 isshortname(key) = isshortname(envs, key)
 islongname(key) = islongname(envs, key)
+
+struct ResolveMe
+    id :: String
+    envshortname :: Symbol
+end
+
+# The magic: \Cref's get resolved during JSON serialization.
+function JSON.lower(R::ResolveMe)
+    count = envs[(R.envshortname,SHORT), DATA][R.id]
+    prefix = uppercasefirst(String(other_name(R.envshortname, SHORT)))
+    "$prefix $count"
+end
 
 """
 Filter to walk through the AST, looking for `Div`'s. If such a `Div` has its first class as one of the environments we are tracking (defined in `envs`), we bump up the corresponding count in `envs`. If it has an `id`, we record the number (i.e. the current count) in the dictionary stored in `envs`. Should be followed by `resolver` to make use of these counts.
@@ -38,7 +52,7 @@ function thmfilter(tag, content, meta, format)
 end
 
 """
-Filter to walk through the AST, looking for `\\Cref{}`'s, which live in `RawInline` Pandoc elements. Upon finding one, we try to resolve the `\\Cref{}`, i.e., replace it by e.g. `Theorem 2`. To do so, we use the `envs` data structure, which needs to be first populated by `thmfilter`.
+Filter to walk through the AST, looking for `\\Cref{}`'s, which live in `RawInline` Pandoc elements. Upon finding one, we try to resolve the `\\Cref{}`, i.e., replace it by e.g. `Theorem 2`. A priori, we need to know what theorem number to point to in order to return a string here. Since we may not have that information yet, we instead put a `ResolveMe` object that gets resolved to the correct string upon JSON serialization.
 
     resolver(tag, content, meta, format)
 """
@@ -49,12 +63,7 @@ function resolver(tag, content, meta, format)
             if startswith(c, raw"\Cref{")
                 id = c[7:end-1]
                 shortname = Symbol(split(id, ":")[1])
-                count = envs[(shortname, SHORT), DATA][id]
-               
-                prefix = uppercasefirst(String(other_name(shortname, SHORT)))
-
-                return PandocFilters.Str("$prefix $count")
-                # @debug "Resolved $prefix $count."
+                return PandocFilters.Str(ResolveMe(id, shortname))
             end
         end
     end

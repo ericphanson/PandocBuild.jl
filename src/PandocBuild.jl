@@ -186,12 +186,10 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     # HTML output requires two stages. In the first, environments are parsed to build up `envs` which is used for numbering later in `resolver`.
      julia_filters_html = [ makeStagedFilter(Dict(
                         "Div" => thmfilter, 
+                        "RawInline" => resolver, 
                         # use relative image path for html
                         "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
-                            )),
-                            makeStagedFilter(Dict(
-                                "RawInline" => resolver,
-                                "Math" => KaTeXFilter
+                        "Math" => KaTeXFilter
                             ))
                          ]             
     markdown_extensions = [
