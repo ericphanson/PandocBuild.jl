@@ -77,13 +77,20 @@ macro timed_task(name, expr)
     quote
         local n = $(esc(name))
         try
-            local val, t, _ = Base.@timed $(esc(expr))
-            @info "$n finished ($(round(t,digits=3))s)"
-            val
+            @timed_task_throw(name, expr)
         catch E
             @error "$n failed" exception=E
             E
         end
+    end
+end
+
+macro timed_task_throw(name, expr)
+    quote
+        local n = $(esc(name))
+        local val, t, _ = Base.@timed $(esc(expr))
+        @info "$n finished ($(round(t,digits=3))s)"
+        val
     end
 end
 
@@ -204,30 +211,41 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     
                         
     reset!(envs) # sneaky reset for the environment numbering (see Filters/Envs.jl)
-
+    pandoc_latex = Channel(1)
+    pandoc_html = Channel(1)
     t = @elapsed @sync begin
 
         
         out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
         @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
 
-        ast_time = @elapsed begin
-            pandoc_AST_latex = JSON.parse(out.stdout);
-            # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
-            pandoc_AST_html = deepcopy(pandoc_AST_latex)
-            AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
-            AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
-            pandoc_latex, pandoc_html = JSON.json(pandoc_AST_latex), JSON.json(pandoc_AST_html)
+
+        pandoc_AST_latex = JSON.parse(out.stdout);
+        @async begin
+            @timed_task_throw "latex filters" begin
+                AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
+                put!(pandoc_latex, JSON.json(pandoc_AST_latex))
+            end
         end
-        @info  "Parsing and filtering AST finished ($(round(ast_time,digits=3))s)"
+
+        @async begin
+            # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
+            @timed_task_throw "html filters" begin
+                pandoc_AST_html = deepcopy(pandoc_AST_latex)
+                AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
+                put!(pandoc_html, JSON.json(pandoc_AST_html))
+            end
+        end
 
         if AST in targets
-            @timed_task "write json" begin
-                open("$outputs/$(filename)_latex.json", "w") do f
-                    print(f, pandoc_latex)
-                end
-                open("$outputs/$(filename)_html.json", "w") do f
-                    print(f, pandoc_html)
+            @async let
+                @timed_task "write json" begin
+                    open("$outputs/$(filename)_latex.json", "w") do f
+                        print(f, fetch(pandoc_latex))
+                    end
+                    open("$outputs/$(filename)_html.json", "w") do f
+                        print(f, fetch(pandoc_html))
+                    end
                 end
             end
         end
@@ -236,7 +254,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             isdir(joinpath(outputs, "reveal.js")) || throw(error("reveal.js must be in outputs"))
             mkslides = @async let
                 @timed_task "slides" begin
-                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind --css=katex.min.css -o $outputs/$filename.html`; input = pandoc_html)
+                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
                 end
             end
 
@@ -245,9 +263,9 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             mktex = @async let
                         @timed_task "tex" begin
                         if SLIDES in targets
-                            communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = pandoc_latex)
+                            communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = fetch(pandoc_latex))
                         else
-                            communicate(`pandoc -f json -s -t latex -o $tex_file`; input = pandoc_latex)
+                            communicate(`pandoc -f json -s -t latex -o $tex_file`; input = fetch(pandoc_latex))
                         end
                         end
                     end
@@ -256,7 +274,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if MD in targets
             mkdown = @async let
                         @timed_task "markdown" begin
-                            communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = pandoc_latex)
+                            communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = fetch(pandoc_latex))
                         end
                     end
         end
@@ -266,7 +284,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             mkhtml = @async let
                     @timed_task "html" begin
                     # would prefer $katexcss but that messes up relative paths for local webserver
-                    communicate(`pandoc -f json -s  -t html --css=katex.min.css -o $outputs/$filename.html`; input = pandoc_html)
+                    communicate(`pandoc -f json -s  -t html --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
                     end
                 end
         end
@@ -313,6 +331,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     end
     wait.(tikz_tasks)
     empty!(tikz_tasks)
+    take!(pandoc_latex)
+    take!(pandoc_html)
     @info "Finished all tasks ($(round(t,digits=3))s)"
 
 end
