@@ -159,8 +159,11 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         # stupid hack for pandoc relative paths
         cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"),  joinpath(outputs, "katex.min.css"))
     end
-    tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
-    tex_file = joinpath(tex_aux, "$filename.tex")
+
+    if TEX in targets
+        tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
+        tex_file = joinpath(tex_aux, "$filename.tex")
+    end
 
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
 

@@ -1,0 +1,60 @@
+┌ Info: First run of math:
+└ @ Main /Users/ephhome/.julia/dev/PandocBuild/test/runtests.jl:8
+┌ Info: Getting AST from pandoc finished (0.665s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:212
+┌ Info: Parsing and filtering AST finished (4.403s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:222
+┌ Info: Launched tasks
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:312
+┌ Info: html finished (0.073s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:81
+┌ Info: Finished all tasks (5.29s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:316
+┌ Info: Second run of math:
+└ @ Main /Users/ephhome/.julia/dev/PandocBuild/test/runtests.jl:10
+┌ Info: Getting AST from pandoc finished (0.049s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:212
+┌ Info: Parsing and filtering AST finished (0.009s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:222
+┌ Info: Launched tasks
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:312
+┌ Info: html finished (0.049s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:81
+┌ Info: Finished all tasks (0.107s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:316
+┌ Info: Third run of math:
+└ @ Main /Users/ephhome/.julia/dev/PandocBuild/test/runtests.jl:12
+┌ Info: Getting AST from pandoc finished (0.049s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:212
+┌ Info: Parsing and filtering AST finished (0.002s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:222
+┌ Info: Launched tasks
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:312
+┌ Info: html finished (0.043s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:81
+┌ Info: Finished all tasks (0.094s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:316
+┌ Info: First run of math2:
+└ @ Main /Users/ephhome/.julia/dev/PandocBuild/test/runtests.jl:14
+┌ Info: Getting AST from pandoc finished (0.048s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:212
+┌ Info: Parsing and filtering AST finished (0.278s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:222
+┌ Info: Launched tasks
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:312
+┌ Info: html finished (0.045s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:81
+┌ Info: Finished all tasks (0.372s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:316
+┌ Info: Second run of math2:
+└ @ Main /Users/ephhome/.julia/dev/PandocBuild/test/runtests.jl:16
+┌ Info: Getting AST from pandoc finished (0.047s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:212
+┌ Info: Parsing and filtering AST finished (0.001s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:222
+┌ Info: Launched tasks
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:312
+┌ Info: html finished (0.049s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:81
+┌ Info: Finished all tasks (0.097s)
+└ @ PandocBuild /Users/ephhome/.julia/dev/PandocBuild/src/PandocBuild.jl:316
