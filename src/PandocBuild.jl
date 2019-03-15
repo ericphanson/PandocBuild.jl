@@ -215,12 +215,12 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     pandoc_html = Channel(1)
     t = @elapsed @sync begin
 
-        
         out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
         @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
-
-
         pandoc_AST_latex = JSON.parse(out.stdout);
+        # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
+        pandoc_AST_html = deepcopy(pandoc_AST_latex)
+
         @async begin
             @timed_task_throw "latex filters" begin
                 AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
@@ -229,9 +229,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         end
 
         @async begin
-            # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
             @timed_task_throw "html filters" begin
-                pandoc_AST_html = deepcopy(pandoc_AST_latex)
                 AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
                 put!(pandoc_html, JSON.json(pandoc_AST_html))
             end
