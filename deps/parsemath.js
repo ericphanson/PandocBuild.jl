@@ -2,12 +2,13 @@ var katex = require("katex");
 var fs=require('fs');
 out = JSON.parse(fs.readFileSync("/dev/stdin", "utf-8"));
 
-for (var key in out)
+var array = [];
+for (var pair of out)
     {
-        out[key] = katex.renderToString(key[0],
+         array.push(katex.renderToString(pair[0],
             {
-                "display": key[1]
-            });
+                "display": pair[1]
+            }))
     }
 
-process.stdout.write(JSON.stringify(out));
+process.stdout.write(JSON.stringify(array));
