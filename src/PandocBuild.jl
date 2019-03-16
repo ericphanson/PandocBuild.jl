@@ -72,7 +72,7 @@ function get_file(file)
     file
 end
 
-const strict = Ref(true)
+const strict = Ref(false)
 macro timed_task(name, expr)
     quote
         local n = $(esc(name))
