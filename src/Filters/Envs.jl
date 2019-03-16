@@ -17,13 +17,13 @@ other_name(key, whichname) = other_name(envs, key, whichname)
 isshortname(key) = isshortname(envs, key)
 islongname(key) = islongname(envs, key)
 
-struct ResolveMe
+struct ResolveCref
     id :: String
     envshortname :: Symbol
 end
 
 # The magic: \Cref's get resolved during JSON serialization.
-function JSON.lower(R::ResolveMe)
+function JSON.lower(R::ResolveCref)
     count = envs[(R.envshortname,SHORT), DATA][R.id]
     prefix = uppercasefirst(String(other_name(R.envshortname, SHORT)))
     "$prefix $count"
@@ -63,7 +63,7 @@ function resolver(tag, content, meta, format)
             if startswith(c, raw"\Cref{")
                 id = c[7:end-1]
                 shortname = Symbol(split(id, ":")[1])
-                return PandocFilters.Str(ResolveMe(id, shortname))
+                return PandocFilters.Str(ResolveCref(id, shortname))
             end
         end
     end

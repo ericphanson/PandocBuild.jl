@@ -162,11 +162,13 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     buildtools = joinpath(@__DIR__, "deps")
     outputs = get_dir("outputs"; create=true, basedir=dir)
 
-    katex_css = joinpath(dir, "katex.min.css")
-    if !isfile(katex_css)
-        cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"), katex_css)
-        # stupid hack for pandoc relative paths
-        cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"),  joinpath(outputs, "katex.min.css"))
+    if (SLIDES in targets) || (WEB in targets)
+        katex_css = joinpath(dir, "katex.min.css")
+        if !isfile(katex_css)
+            cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"), katex_css)
+            # stupid hack for pandoc relative paths
+            cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"),  joinpath(outputs, "katex.min.css"))
+        end
     end
 
     if TEX in targets
@@ -230,6 +232,9 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         @async begin
             @timed_task_throw "html filters" begin
                 AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
+                @info "starting resolve math"
+                resolve_math!()
+                @info "finished resolve math"
                 put!(pandoc_html, JSON.json(pandoc_AST_html))
             end
         end

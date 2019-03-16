@@ -2,29 +2,39 @@ using NodeJS
 
 const nodepath = normpath(joinpath(@__DIR__, "..","..", "deps/"))
 
+struct ResolveKaTeX
+    mathstr :: String
+    display :: Bool
+end
+const math_resolve_dict = Dict{Tuple{String, Bool}, Union{Nothing, String}}()
+
+function JSON.lower(R::ResolveKaTeX)
+    math_resolve_dict[(R.mathstr, R.bool)]
+end
+ 
 # Instead of running many processes to parse each expression, I should use the ResolveMe trick to first collect
 # all the unparsed expressions, then parse them all at once in one call to node (caching the results as now), and then
 # resolve them upon deserialization.
+
+function resolve_math!()
+    # testdict = Dict(("abc", true) => nothing, ("bcf", false) => nothing)
+    path = joinpath(nodepath, "parsemath.js")
+    out = communicate(Cmd(`$(nodejs_cmd()) $path`; dir=nodepath),                                 input=JSON.json(math_resolve_dict)).stdout
+    math_resolve_dict = JSON.parse(out)
+    # return out
+end
+
+
+
 """
 Remove unicode characters (via `to_latex`), then render to KaTeX via node.
 
     katex_math(content) -> RawInline
 """
-const katex_math = DictCache{Tuple{String, Bool}, String}(
- ((mathstr, display),) -> begin
-        display_str = display ? "true" : "false"
-        mathstr = strip(to_latex(mathstr))
-        str =   raw"""var katex = require("katex");
-                    var str = katex.renderToString(String.raw""" * "\`" * mathstr * "\`" *
-                raw""", { displayMode: """ * display_str *
-                raw""" });
-                    process.stdout.write(str);
-                """
-        
-        out = communicate(Cmd(`$(nodejs_cmd())`; dir=nodepath); input=str)   
-        rendered_str = out.stdout
-        return rendered_str
-    end)
+function katex_math(mathstr, display)
+    val = get!(math_resolve_dict, (mathstr, display), nothing)
+    isnothing(val) ? ResolveKaTeX(mathstr, display) : val
+end
 
 
 
