@@ -137,7 +137,7 @@ function normalize_targets(targets, openpdf)
     eltype(targets) == BuildTargets || throw(ArgumentError("targets must be a single BuiltTargets or a vector or set thereof"))
 
     if ALL in targets
-        return Set(instances(BuildTargets))
+         union!(targets, Set(instances(BuildTargets)))
     end
 
     if openpdf
@@ -147,7 +147,14 @@ function normalize_targets(targets, openpdf)
     if PDF in targets
         push!(targets, TEX)
     end
-    return targets
+
+    needTEX = (TEX in targets);
+    if WEB in targets || SLIDES in targets || MD in targets
+        needHTML = true;
+    else
+        needHTML = false;
+    end
+    return targets, needTEX, needHTML
 end
 
 
@@ -155,14 +162,15 @@ end
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     cd(dir)
-    targets = normalize_targets(targets, openpdf)
+    targets, needTEX, needHTML = normalize_targets(targets, openpdf)
 
     pdf_viewer = "/Applications/Skim.app/Contents/MacOS/Skim"
     src = get_dir("src"; basedir=dir)
     buildtools = joinpath(@__DIR__, "deps")
     outputs = get_dir("outputs"; create=true, basedir=dir)
 
-    if (SLIDES in targets) || (WEB in targets)
+    @show needHTML
+    if needHTML
         katex_css = joinpath(dir, "katex.min.css")
         if !isfile(katex_css)
             cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"), katex_css)
@@ -171,7 +179,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         end
     end
 
-    if TEX in targets
+    if needTEX
         tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
         tex_file = joinpath(tex_aux, "$filename.tex")
     end
@@ -219,37 +227,47 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
         @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
         pandoc_AST_latex = JSON.parse(out.stdout);
-        # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
-        pandoc_AST_html = deepcopy(pandoc_AST_latex)
 
-        @async begin
-            @timed_task_throw "latex filters" begin
-                AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
-                put!(pandoc_latex, JSON.json(pandoc_AST_latex))
+        # only copy if we really need 2
+        if needTEX
+            # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
+            pandoc_AST_html = deepcopy(pandoc_AST_latex)
+        else
+            pandoc_AST_html = pandoc_AST_latex
+        end
+
+        if needTEX
+            @async begin   
+                @timed_task_throw "latex filters" begin
+                    AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
+                    put!(pandoc_latex, JSON.json(pandoc_AST_latex))
+                end
             end
         end
 
-        @async begin
-            @timed_task_throw "html filters" begin
-            @info "starting html filters"
-
-                AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
-                @info "starting resolve math"
-                resolve_math!()
-                @info "finished resolve math"
-                pandoc_AST_html_string = JSON.json(pandoc_AST_html)
-                put!(pandoc_html, pandoc_AST_html_string)
+        if needHTML
+            @async begin
+                @timed_task_throw "html filters" begin
+                    AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
+                    resolve_math!()
+                    pandoc_AST_html_string = JSON.json(pandoc_AST_html)
+                    put!(pandoc_html, pandoc_AST_html_string)
+                end
             end
         end
 
         if AST in targets
             @async let
                 @timed_task "write json" begin
-                    open("$outputs/$(filename)_latex.json", "w") do f
-                        print(f, fetch(pandoc_latex))
+                    if needTEX
+                        open("$outputs/$(filename)_latex.json", "w") do f
+                            print(f, fetch(pandoc_latex))
+                        end
                     end
-                    open("$outputs/$(filename)_html.json", "w") do f
-                        print(f, fetch(pandoc_html))
+                    if needHTML
+                        open("$outputs/$(filename)_html.json", "w") do f
+                            print(f, fetch(pandoc_html))
+                        end
                     end
                 end
             end
@@ -279,7 +297,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if MD in targets
             mkdown = @async let
                         @timed_task "markdown" begin
-                            communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = fetch(pandoc_latex))
+                            communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = fetch(pandoc_html))
                         end
                     end
         end
@@ -304,27 +322,27 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                         end 
                     end
         
-        checkerrors = @async let
-                    wait(mkpdf)
-                        @timed_task "rubber-info" begin
-                            # careful: cd changes global state for other tasks.
-                            # (https://stackoverflow.com/questions/44571713/julia-language-state-in-async-tasks-current-directory)
-                            # since this waits for mkpdf, it runs basically after everything else
-                            # so it's probably fine, but maybe this should be changed.
-                            rubber_out = cd(tex_aux) do
-                                    read(`rubber-info $(relpath(tex_file))`, String)
-                            end
-                            for line in split(rubber_out, "\n")
-                                if line != ""
-                                    @info line
-                                    # write(stdout, "[rubber-info]: " * line * "\n")
+            checkerrors = @async let
+                        wait(mkpdf)
+                            @timed_task "rubber-info" begin
+                                # careful: cd changes global state for other tasks.
+                                # (https://stackoverflow.com/questions/44571713/julia-language-state-in-async-tasks-current-directory)
+                                # since this waits for mkpdf, it runs basically after everything else
+                                # so it's probably fine, but maybe this should be changed.
+                                rubber_out = cd(tex_aux) do
+                                        read(`rubber-info $(relpath(tex_file))`, String)
+                                end
+                                for line in split(rubber_out, "\n")
+                                    if line != ""
+                                        @info line
+                                        # write(stdout, "[rubber-info]: " * line * "\n")
+                                    end
                                 end
                             end
-                        end
-                    end
+            end
         end
 
-        if openpdf
+        if openpdf && (PDF in targets)
         do_openpdf = @async let
                     wait(mkpdf)
                     @timed_task "open pdf" run(pipeline(pipeline(`echo $skim_script`, `osascript`), stdout=devnull))
@@ -336,8 +354,12 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     end
     wait.(tikz_tasks)
     empty!(tikz_tasks)
-    take!(pandoc_latex)
-    take!(pandoc_html)
+    if needTEX
+        take!(pandoc_latex)
+    end
+    if needHTML
+        take!(pandoc_html)
+    end
     @info "Finished all tasks ($(round(t,digits=3))s)"
 
 end
