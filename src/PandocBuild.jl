@@ -237,12 +237,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 @info "starting resolve math"
                 resolve_math!()
                 @info "finished resolve math"
-                @show pandoc_html
-                @show pandoc_AST_html
                 pandoc_AST_html_string = JSON.json(pandoc_AST_html)
-                @show pandoc_AST_html_string
                 put!(pandoc_html, pandoc_AST_html_string)
-                @show pandoc_html
             end
         end
 
