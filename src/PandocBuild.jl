@@ -72,7 +72,7 @@ function get_file(file)
     file
 end
 
-
+const strict = Ref(true)
 macro timed_task(name, expr)
     quote
         local n = $(esc(name))
@@ -82,6 +82,9 @@ macro timed_task(name, expr)
             val
         catch E
             @error "$n failed" exception=E
+            if strict[]
+                rethrow(E)
+            end
             E
         end
     end
@@ -161,21 +164,38 @@ end
 # The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
-    cd(dir)
     targets, needTEX, needHTML = normalize_targets(targets, openpdf)
 
     pdf_viewer = "/Applications/Skim.app/Contents/MacOS/Skim"
     src = get_dir("src"; basedir=dir)
-    buildtools = joinpath(@__DIR__, "deps")
+    deps = normpath(joinpath(@__DIR__, "..", "deps"))
     outputs = get_dir("outputs"; create=true, basedir=dir)
 
-    @show needHTML
     if needHTML
-        katex_css = joinpath(dir, "katex.min.css")
-        if !isfile(katex_css)
-            cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"), katex_css)
-            # stupid hack for pandoc relative paths
-            cp(joinpath(@__DIR__, "..", "deps", "katex.min.css"),  joinpath(outputs, "katex.min.css"))
+
+        katex_deps = joinpath(deps, "katex.min.css")
+        katex_dir = joinpath(dir, "katex.min.css")
+        katex_outputs = joinpath(outputs, "katex.min.css")
+
+        if !isfile(katex_dir)
+            cp(katex_deps, katex_dir)
+        end
+        if !isfile(katex_outputs)
+            cp(katex_deps,  katex_outputs)
+        end
+
+    end
+
+    if SLIDES in targets
+        revealjs_deps = joinpath(deps, "reveal.js")
+        revealjs_dir = joinpath(dir, "reveal.js")
+        revealjs_outputs = joinpath(outputs, "reveal.js")
+
+        if !isdir(revealjs_dir)
+            cp(revealjs_deps, revealjs_dir)
+        end
+        if !isdir(revealjs_outputs)
+            cp(revealjs_deps,  revealjs_outputs)
         end
     end
 
