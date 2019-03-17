@@ -42,6 +42,11 @@ header-includes: |
 
 Test $𝔽$. 
 
+Test $χ^3+2$
+\[
+𝔽=5
+\]
+
 In the following theorem (\Cref{thm:t1}), we will show that $μ^2 = 2$.
 
 ::: {.theorem #thm:t1}
