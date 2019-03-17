@@ -13,10 +13,20 @@ end
 
 Make(f, name ; inputs, outputs,  throw = false) = Make(f=f, name=name, inputs=inputs, outputs=outputs, throw=throw)
 
+struct FailedDepsException <: Exception
+    failed_deps
+end
 function start_make(m::Make, ChannelDict)
     @async begin
         inputs = [ fetch(ChannelDict[i]) for i in m.inputs ]
+        failed_deps = Resources[]
+        for (j, input) = enumerate(m.inputs)
+            if inputs[j] == :failed
+                push!(failed_deps, input)
+            end
+        end
         try
+            isempty(failed_deps) || throw(FailedDepsException(failed_deps))
             outputs, t, _ = Base.@timed m.f(inputs)
             for (j, o) in enumerate(m.outputs)
                 put!(ChannelDict[o], outputs[j] )

@@ -158,8 +158,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         "+backtick_code_blocks",
         "+tex_math_single_backslash"
         ]
-    if needHTML
 
+    function ensure_katex_css()
         katex_deps = joinpath(deps, "katex.min.css")
         katex_dir = joinpath(dir, "katex.min.css")
         katex_outputs = joinpath(outputs, "katex.min.css")
@@ -170,25 +170,6 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if !isfile(katex_outputs)
             cp(katex_deps,  katex_outputs)
         end
-
-    end
-
-    if SLIDES in targets
-        revealjs_deps = joinpath(deps, "reveal.js")
-        revealjs_dir = joinpath(dir, "reveal.js")
-        revealjs_outputs = joinpath(outputs, "reveal.js")
-
-        if !isdir(revealjs_dir)
-            cp(revealjs_deps, revealjs_dir)
-        end
-        if !isdir(revealjs_outputs)
-            cp(revealjs_deps,  revealjs_outputs)
-        end
-    end
-
-    if needTEX
-        tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
-        tex_file = joinpath(tex_aux, "$filename.tex")
     end
 
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
@@ -261,48 +242,71 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 inputs = [FILT_WEB_JSON],
                 outputs = [SLIDES]) do inputs
                     filt_web_json = inputs[]
-                    isdir(joinpath(outputs, "reveal.js")) || throw(error("reveal.js must be in outputs"))
+                    revealjs_deps = joinpath(deps, "reveal.js")
+                    revealjs_dir = joinpath(dir, "reveal.js")
+                    revealjs_outputs = joinpath(outputs, "reveal.js")
+            
+                    if !isdir(revealjs_dir)
+                        cp(revealjs_deps, revealjs_dir)
+                    end
+                    if !isdir(revealjs_outputs)
+                        cp(revealjs_deps,  revealjs_outputs)
+                    end
+
+                    ensure_katex_css()
+
                     communicate(`pandoc -f json -s -t revealjs -V theme=sunblind --css=katex.min.css -o $outputs/$filename.html`; input = filt_web_json)
+                    true
             end,
         Make("Write tex file",
                 inputs = [FILT_TEX_JSON],
-                outputs = [TEX]) do inputs
+                outputs = [TEX, TEX_AUX_PATH, TEX_FILE_PATH]) do inputs
                     filt_tex_json = inputs[]
+                    tex_aux_path = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
+                    tex_file_path = joinpath(tex_aux_path, "$filename.tex")
+
                     if SLIDES in targets
-                        communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = filt_tex_json)
+                        communicate(`pandoc -f json -s -t beamer -o $tex_file_path`; input = filt_tex_json)
                     else
-                        communicate(`pandoc -f json -s -t latex -o $tex_file`; input = filt_tex_json)
+                        communicate(`pandoc -f json -s -t latex -o $tex_file_path`; input = filt_tex_json)
                     end
+                    return [true, tex_aux_path, tex_file_path]
                 end,
         Make("Write MD",
                 inputs = [FILT_TEX_JSON],
                 outputs = [MD]) do inputs
                     filt_tex_json = inputs[]
                     communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = filt_tex_json)
+                    true
                 end,
         Make("Write html",
                 inputs = [FILT_WEB_JSON],
                 outputs = [WEB]) do inputs
                 filt_web_json = inputs[]
+                ensure_katex_css()
                 # would prefer $katexcss but that messes up relative paths for local webserver
                 communicate(`pandoc -f json -s  -t html --css=katex.min.css -o $outputs/$filename.html`; input = filt_web_json)
+                true
                 end,
         Make("Write PDF",
-                inputs = [TEX],
+                inputs = [TEX, TEX_AUX_PATH, TEX_FILE_PATH],
                 outputs = [PDF]) do inputs
+                    _, tex_aux_path, tex_file_path = inputs
                     wait.(tikz_tasks)
-                    run(pipeline(`latexmk $tex_file -pdf -cd -silent`, stdout=devnull, stderr=devnull))
-                    cp(joinpath(tex_aux, "$filename.pdf"), joinpath(outputs, "$filename.pdf"); force=true)
+                    run(pipeline(`latexmk $tex_file_path -pdf -cd -silent`, stdout=devnull, stderr=devnull))
+                    cp(joinpath(tex_aux_path, "$filename.pdf"), joinpath(outputs, "$filename.pdf"); force=true)
+                true
                 end,
         Make("Parse tex log",
-                inputs = [PDF],
+                inputs = [PDF, TEX_FILE_PATH, TEX_AUX_PATH],
                 outputs = [PARSE_TEX_LOG]) do inputs
+                    _, tex_file_path, tex_aux_path = inputs
                      # careful: cd changes global state for other tasks.
                     # (https://stackoverflow.com/questions/44571713/julia-language-state-in-async-tasks-current-directory)
                     # since this waits for mkpdf, it runs basically after everything else
                     # so it's probably fine, but maybe this should be changed.
-                    rubber_out = cd(tex_aux) do
-                                read(`rubber-info $(relpath(tex_file))`, String)
+                    rubber_out = cd(tex_aux_path) do
+                                read(`rubber-info $(relpath(tex_file_path))`, String)
                                 end
                     for line in split(rubber_out, "\n")
                         if line != ""
@@ -310,11 +314,13 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                             # write(stdout, "[rubber-info]: " * line * "\n")
                         end
                     end
+                    true
                     end,
             Make("open PDF", inputs = [PDF], outputs =[]) do inputs
                 if openpdf
                     run(pipeline(pipeline(`echo $skim_script`, `osascript`), stdout=devnull))
                 end
+                openpdf
             end
     ]
 
@@ -335,13 +341,14 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     pandoc_from = reduce(*, markdown_extensions; init="markdown")
     out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
     @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
+
     raw_tex_json = JSON.parse(out.stdout);
     raw_web_json = deepcopy(raw_tex_json)
 
     put!(ChannelDict[RAW_TEX_JSON], raw_tex_json)
     put!(ChannelDict[RAW_WEB_JSON], raw_web_json)
 
-    return wait.(start_make.(make_list, Ref(ChannelDict)))
+    t = @elapsed wait.(start_make.(make_list, Ref(ChannelDict)))
 
     wait.(tikz_tasks)
     empty!(tikz_tasks)
