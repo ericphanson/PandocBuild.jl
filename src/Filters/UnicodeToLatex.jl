@@ -2,14 +2,30 @@ using LaTeX_Entities, StrTables
 
 const LaTeX_Table = LaTeX_Entities.default
 
+# https://github.com/mpastell/Weave.jl/blob/master/src/format.jl#L292
+function texify(s)
+    ts = ""
+    if occursin(r"^\\bf[A-Z]$", s)
+        ts = replace(s, "\\bf" => "\\bm{\\mathrm{") * "}}"
+    elseif startswith(s, "\\bfrak")
+        ts = replace(s, "\\bfrak" => "\\bm{\\mathfrak{") * "}}"
+    elseif startswith(s, "\\bf")
+        ts = replace(s, "\\bf" => "\\bm{\\") * "}"
+    elseif startswith(s, "\\frak")
+        ts = replace(s, "\\frak" => "\\mathfrak{") * "}"
+    else
+        ts = s
+    end
+    return ts
+end
+
 function to_latex_char(char::AbstractChar)
     possibilities = StrTables.matchchar(LaTeX_Table, char)
     isempty(possibilities) && return String(char)
     if length(possibilities) > 1
         @warn "Ambiguity in latexing character" char possibilities
-        return "\\" * possibilities[1]
     end
-    "\\" * possibilities[]
+    "\\" * texify(possibilities[1]) * " "
 end
 
 """

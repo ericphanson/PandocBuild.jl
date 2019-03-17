@@ -40,7 +40,7 @@ header-includes: |
 \newcommand{\ket}[1]{| #1 \rangle}
 \newcommand{\bra}[1]{\langle #1 |}
 
-Test
+Test $𝔽$. 
 
 In the following theorem (\Cref{thm:t1}), we will show that $μ^2 = 2$.
 

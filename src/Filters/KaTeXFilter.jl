@@ -20,12 +20,31 @@ function JSON.lower(R::ResolveKaTeX)::String
 end
 
 function resolve_math!()
+    isempty(to_resolve) && return nothing
     path = joinpath(nodepath, "parsemath.js")
-    out = communicate(Cmd(`$(nodejs_cmd()) $path`; dir=nodepath),input=JSON.json(to_resolve)).stdout |> JSON.parse
-    for j = eachindex(to_resolve)
-        math_resolve_dict[to_resolve[j]] = out[j]
+    @debug "Started katex"
+    @debug to_resolve
+    out = communicate(Cmd(`$(nodejs_cmd()) $path`; dir=nodepath), input = JSON.json(to_resolve)).stdout 
+    @debug "KaTeX returned"
+    out = out |> JSON.parse
+    @debug out
+    try
+        for j = eachindex(to_resolve)
+        @debug "at index $j" to_resolve[j]
+        katex_error = out[j]["error"]
+        if katex_error != ""
+            @warn "KaTeX error" katex_error
+        end
+        rendered_str = out[j]["render"]
+        math_resolve_dict[to_resolve[j]] = rendered_str
+    end
+    catch E
+        @error E
+        rethrow(E)
     end
     empty!(to_resolve)
+    @debug "`resolve_math!` done"
+    nothing
 end
 
 
@@ -49,7 +68,7 @@ end
 function KaTeXFilter(tag, content, format, meta)
     if tag == "Math"
         mathtype_dict, mathstr = content
-        mathstr = to_latex(mathstr)
+        mathstr = strip(to_latex(mathstr))
         display = mathtype_dict["t"] == "DisplayMath"
         rendered_str = katex_math(mathstr, display)
         return PandocFilters.RawInline("html", rendered_str)

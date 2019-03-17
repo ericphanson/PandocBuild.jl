@@ -22,8 +22,8 @@ function communicate(cmd::Cmd; input = nothing)
     close(out.in)
     close(err.in)
 
-    stdout = @async String(read(out))
-    stderr = @async String(read(err))
+    sout = @async String(read(out))
+    serr = @async String(read(err))
 
     if input !== nothing
         if input isa AbstractString
@@ -36,13 +36,20 @@ function communicate(cmd::Cmd; input = nothing)
     end
 
     close(inp)
+    @debug "The process" process
+    
+    @debug "after sleeping $(isnothing(sleep(1)))"  process
+
     wait(process)
-    so = fetch(stdout)
-    se = fetch(stderr)
+    @debug "after waiting" process
+    @debug "the process's stdin and stdout are" sout serr
+    so = fetch(sout)
+    se = fetch(serr)
+    @debug "these have been fetched" so se
     code = process.exitcode
 
     code == 0 || begin
-        @error "Error in communicate" cmd
+        @error "Error in communicate" cmd so se
         throw(ProcessException(code, se))
     end
     return (
@@ -269,8 +276,13 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             @async begin
                 @timed_task_throw "html filters" begin
                     AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
+                    @debug "Starting `resolve_math!`"
                     resolve_math!()
+                    @debug "Finished `resolve_math!`"
+
+                    @debug "Starting JSON.json(pandoc_AST_html)"
                     pandoc_AST_html_string = JSON.json(pandoc_AST_html)
+                    @debug "Done JSON.json(pandoc_AST_html)"
                     put!(pandoc_html, pandoc_AST_html_string)
                 end
             end
