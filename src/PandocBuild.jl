@@ -311,7 +311,6 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                     for line in split(rubber_out, "\n")
                         if line != ""
                             @info line
-                            # write(stdout, "[rubber-info]: " * line * "\n")
                         end
                     end
                     true
@@ -339,7 +338,9 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
 
     pandoc_from = reduce(*, markdown_extensions; init="markdown")
+
     out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
+    
     @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
 
     raw_tex_json = JSON.parse(out.stdout);

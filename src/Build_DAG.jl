@@ -16,6 +16,7 @@ Make(f, name ; inputs, outputs,  throw = false) = Make(f=f, name=name, inputs=in
 struct FailedDepsException <: Exception
     failed_deps
 end
+
 function start_make(m::Make, ChannelDict)
     @async begin
         inputs = [ fetch(ChannelDict[i]) for i in m.inputs ]
