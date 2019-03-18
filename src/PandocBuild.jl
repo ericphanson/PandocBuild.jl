@@ -310,7 +310,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             mkslides = @async let
                 @timed_task "slides" begin
                 # temp add js for my slides
-                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind -H buttons.css -A anim1.js -A anim2.js -A anim3.js --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
+                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind -H buttons.css -A anim1.js -A anim2.js -A anim3.js -A anim4.js -A anim5.js --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
                 end
             end
 
