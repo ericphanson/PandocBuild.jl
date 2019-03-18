@@ -309,7 +309,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             isdir(joinpath(outputs, "reveal.js")) || throw(error("reveal.js must be in outputs"))
             mkslides = @async let
                 @timed_task "slides" begin
-                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
+                # temp add js for my slides
+                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind -H buttons.css -A anim1.js -A anim2.js -A anim3.js --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
                 end
             end
 
