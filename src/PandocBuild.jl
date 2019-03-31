@@ -1,7 +1,9 @@
 module PandocBuild
 
 # build and possible build targets
-export build, watch, WEB, TEX, PDF, TEX_AST, WEB_AST, MD, ALL, SLIDES
+export build, watch,    WEB, WEB_AST, WEB_MD, WEB_SLIDES,
+                        TEX, PDF, TEX_AST, TEX_MD, TEX_SLIDES,
+                        ALL
 
 # Proccess and logging
 using Logging
@@ -36,16 +38,11 @@ function communicate(cmd::Cmd; input = nothing)
     end
 
     close(inp)
-    @debug "The process" process
-    
-    @debug "after sleeping $(isnothing(sleep(1)))"  process
 
     wait(process)
     @debug "after waiting" process
-    @debug "the process's stdin and stdout are" sout serr
     so = fetch(sout)
     se = fetch(serr)
-    @debug "these have been fetched" so se
     code = process.exitcode
 
     code == 0 || begin
@@ -106,7 +103,7 @@ end
 
 # Build targets
 
-@enum BuildTargets WEB TEX PDF WEB_AST TEX_AST MD ALL SLIDES
+@enum BuildTargets WEB WEB_AST WEB_MD WEB_SLIDES TEX PDF TEX_AST TEX_MD TEX_SLIDES ALL
 
 include("Build_DAG.jl")
 
@@ -134,11 +131,7 @@ function normalize_targets(targets, openpdf)
     end
 
     needTEX = (TEX in targets);
-    if WEB in targets || SLIDES in targets || MD in targets
-        needHTML = true;
-    else
-        needHTML = false;
-    end
+    needHTML = true;
     return targets, needTEX, needHTML
 end
 
@@ -188,12 +181,15 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
 
 
+    all_targets = [ tar for tar in instances(BuildTargets) if tar !=  ALL]
+
     make_list = [
         Make("filter tex", 
-                inputs = [RAW_TEX_JSON], 
+                inputs = [RAW_JSON], 
                 outputs = [FILT_TEX_JSON], 
                 throw=true) do inputs
-                    raw_tex_json = inputs[]
+                    raw_json = inputs[]
+                    raw_tex_json = deepcopy(raw_json)
                     julia_filters_latex =  [ makeStagedFilter(Dict(
                         "Math" => unicode_to_latex,
                         "RawBlock" => (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
@@ -202,10 +198,11 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                     [JSON.json(raw_tex_json)]
                 end,
         Make("filter web",
-                inputs = [RAW_WEB_JSON],
+                inputs = [RAW_JSON],
                 outputs = [FILT_WEB_JSON],
                 throw = true) do inputs
-                    raw_web_json = inputs[]
+                    raw_json = inputs[]
+                    raw_web_json = deepcopy(raw_json)
                     julia_filters_html = [ makeStagedFilter(Dict(
                         "Div" => thmfilter, 
                         "RawInline" => resolver, 
@@ -240,7 +237,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 end,
         Make("Write revealjs slides",
                 inputs = [FILT_WEB_JSON],
-                outputs = [SLIDES]) do inputs
+                outputs = [WEB_SLIDES]) do inputs
                     filt_web_json = inputs[]
                     revealjs_deps = joinpath(deps, "reveal.js")
                     revealjs_dir = joinpath(dir, "reveal.js")
@@ -274,7 +271,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                 end,
         Make("Write MD",
                 inputs = [FILT_TEX_JSON],
-                outputs = [MD]) do inputs
+                outputs = [TEX_MD]) do inputs
                     filt_tex_json = inputs[]
                     communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = filt_tex_json)
                     true
@@ -320,6 +317,8 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                     run(pipeline(pipeline(`echo $skim_script`, `osascript`), stdout=devnull))
                 end
                 openpdf
+            end,
+            Make("all", inputs = all_targets, outputs = [ALL]) do inputs
             end
     ]
 
@@ -333,31 +332,36 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
             ChannelDict[j] = Channel(1)
         end
     end
-
     reset_channel_dict!()
 
+    
+    G, build_dag_time, _ = @timed build_DAG(make_list)
+    @info  "Building DAG took ($(round(build_dag_time,digits=3))s)"
+
+    do_list = get_do_list(G, make_list, targets)
 
     pandoc_from = reduce(*, markdown_extensions; init="markdown")
 
     out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
     
     @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
+    raw_json = JSON.parse(out.stdout)
+    put!(ChannelDict[RAW_JSON], raw_json)
 
-    raw_tex_json = JSON.parse(out.stdout);
-    raw_web_json = deepcopy(raw_tex_json)
+    @debug "Starting do_list"
 
-    put!(ChannelDict[RAW_TEX_JSON], raw_tex_json)
-    put!(ChannelDict[RAW_WEB_JSON], raw_web_json)
+    task_list = start_make.(do_list, Ref(ChannelDict))
+    @debug "constructed task_list" task_list
+    t = @elapsed wait.(task_list)
 
-    t = @elapsed wait.(start_make.(make_list, Ref(ChannelDict)))
-
+    @debug "waiting for tikz_tasks"
     wait.(tikz_tasks)
     empty!(tikz_tasks)
 
     reset_channel_dict!()
 
     @info "Finished all tasks ($(round(t,digits=3))s)"
-
+    return G
 end
 
 
