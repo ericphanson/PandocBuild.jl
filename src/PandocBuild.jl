@@ -103,7 +103,7 @@ end
 
 # Build targets
 
-@enum BuildTargets WEB WEB_AST WEB_MD WEB_SLIDES TEX PDF TEX_AST TEX_MD TEX_SLIDES ALL
+@enum BuildTargets WEB WEB_AST WEB_MD WEB_SLIDES TEX PDF TEX_AST TEX_MD TEX_SLIDES ALL OPEN_PDF
 
 include("Build_DAG.jl")
 
@@ -115,31 +115,24 @@ function normalize_targets(targets, openpdf)
     else
         targets = Set([targets])
     end
-
+ 
     eltype(targets) == BuildTargets || throw(ArgumentError("targets must be a single BuiltTargets or a vector or set thereof"))
-
-    if ALL in targets
-         union!(targets, Set(instances(BuildTargets)))
-    end
-
     if openpdf
-        push!(targets, PDF)
+        push!(targets, OPEN_PDF)
     end
-
-    if PDF in targets
-        push!(targets, TEX)
-    end
-
-    needTEX = (TEX in targets);
-    needHTML = true;
-    return targets, needTEX, needHTML
+    return targets
 end
 
 
 # The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
-    targets, needTEX, needHTML = normalize_targets(targets, openpdf)
+    targets = normalize_targets(targets, openpdf)
+    
+    if isempty(targets)
+        throw(ArgumentError("No build targets; exiting."))
+        return false
+    end
 
     pdf_viewer = "/Applications/Skim.app/Contents/MacOS/Skim"
     src = get_dir("src"; basedir=dir)
@@ -181,8 +174,12 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
 
 
 
-    all_targets = [ tar for tar in instances(BuildTargets) if tar !=  ALL]
+    all_targets = [ tar for tar in instances(BuildTargets) if (tar !=  ALL) && (tar != OPEN_PDF)]
+    if openpdf
+        push!(all_targets, OPEN_PDF)
+    end
 
+    
     make_list = [
         Make("filter tex", 
                 inputs = [RAW_JSON], 
@@ -262,18 +259,25 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                     tex_aux_path = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
                     tex_file_path = joinpath(tex_aux_path, "$filename.tex")
 
-                    if SLIDES in targets
+                    if TEX_SLIDES in targets
                         communicate(`pandoc -f json -s -t beamer -o $tex_file_path`; input = filt_tex_json)
                     else
                         communicate(`pandoc -f json -s -t latex -o $tex_file_path`; input = filt_tex_json)
                     end
                     return [true, tex_aux_path, tex_file_path]
                 end,
-        Make("Write MD",
+        Make("Write TEX_MD",
                 inputs = [FILT_TEX_JSON],
                 outputs = [TEX_MD]) do inputs
                     filt_tex_json = inputs[]
-                    communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = filt_tex_json)
+                    communicate(`pandoc -f json -s -t markdown -o $outputs/tex_$filename.md`; input = filt_tex_json)
+                    true
+                end,
+        Make("Write WEB_MD",
+                inputs = [FILT_WEB_JSON],
+                outputs = [WEB_MD]) do inputs
+                    filt_web_json = inputs[]
+                    communicate(`pandoc -f json -s -t markdown -o $outputs/web_$filename.md`; input = filt_web_json)
                     true
                 end,
         Make("Write html",
@@ -312,14 +316,15 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                     end
                     true
                     end,
-            Make("open PDF", inputs = [PDF], outputs =[]) do inputs
+            Make("open PDF", inputs = [PDF], outputs =[OPEN_PDF]) do inputs
                 if openpdf
                     run(pipeline(pipeline(`echo $skim_script`, `osascript`), stdout=devnull))
                 end
                 openpdf
             end,
             Make("all", inputs = all_targets, outputs = [ALL]) do inputs
-            end
+                true
+            end,
     ]
 
     ChannelDict = Dict{Resources, Any}()
@@ -334,19 +339,23 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     end
     reset_channel_dict!()
 
+    # Start getting the AST right away
+    start_make(Make("Get AST from pandoc", inputs = [], outputs = [RAW_JSON]) do inputs
+        pandoc_from = reduce(*, markdown_extensions; init="markdown")
+
+        out = communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
+        
+        [JSON.parse(out.stdout)]
+    end, ChannelDict)
     
+
     G, build_dag_time, _ = @timed build_DAG(make_list)
     @info  "Building DAG took ($(round(build_dag_time,digits=3))s)"
 
-    do_list = get_do_list(G, make_list, targets)
+    do_list, build_do_list_time, _ = @timed get_do_list(G, make_list, targets)
+    @info  "Choosing optimal path through DAG took ($(round(build_do_list_time,digits=3))s)"
 
-    pandoc_from = reduce(*, markdown_extensions; init="markdown")
-
-    out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
-    
-    @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
-    raw_json = JSON.parse(out.stdout)
-    put!(ChannelDict[RAW_JSON], raw_json)
+   
 
     @debug "Starting do_list"
 
