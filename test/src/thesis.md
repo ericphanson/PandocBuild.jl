@@ -63,6 +63,13 @@ x^2 = 4
 
 (-@eq:5) is a nice equation.
 
+\[
+x^2 = 4 + \int_0^\infty x^2 \mathrm{d}x
+\label{eq:new}
+\] 
+
+\Cref{eq:new} is an even nicer equation.
+
 \Cref{thm:t1} says that $μ^2=1$.rstt
 
 ::: {.remark #rem:r1}

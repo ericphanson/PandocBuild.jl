@@ -7,7 +7,8 @@ include("EnvLookup.jl")
 # to `thmfilter` and `resolver`, then call `AST_filter!` with a closure.
 const envs = EnvsLookup{Symbol, Symbol, Dict{String, Int}}([
     (:theorem, :thm),
-    (:remark, :rem)
+    (:remark, :rem),
+    (:equation, :eq),
     ])
 
 
@@ -47,6 +48,41 @@ function thmfilter(tag, content, meta, format)
 
         envs[(longname, LONG), DATA][id] = envs[(longname, LONG), COUNT]
 
+    end
+    if tag == "Math"
+        fin = () -> KaTeXFilter(tag, content, format, meta)
+        mathtype_dict, mathstr = content
+        mathstr = strip(to_latex(mathstr))
+        display = mathtype_dict["t"] == "DisplayMath"
+
+        display || return fin()
+
+        reg_match = match(r"\\label{(eq\:.+)}", mathstr)
+        isnothing(reg_match) && return fin()
+        length(reg_match.captures) == 1 || @warn("Double label found", mathstr)
+        id = reg_match.captures[1]
+
+        longname = :equation
+        islongname(longname) || return fin()
+
+        envs[(longname, LONG), COUNT] += 1
+        current_count =  envs[(longname, LONG), COUNT]
+        envs[(longname, LONG), DATA][id] = current_count
+
+        # Something is wrong: "\tag{$current_count}" should render a tab from the \t, but
+        # if I put \\tag, then the double \ is passed to node which treats it as two \'s.
+        mathstr = replace(mathstr, r"\\label{(eq\:.+)}" => "\\tag{$current_count}", count=1)
+        mathstr = replace(mathstr, r"\n" => "") # maybe doesn't matter
+        @show mathstr
+        @show mathtype_dict
+        content = Any[mathtype_dict, mathstr]
+        path = joinpath(nodepath, "parsemath.js")
+
+        out = communicate(Cmd(`$(nodejs_cmd()) $path`; dir=nodepath), input = JSON.json([(mathstr, true)])).stdout 
+        out = out |> JSON.parse
+        @show out
+
+        return KaTeXFilter(tag, content, format, meta)
     end
     return nothing
 end

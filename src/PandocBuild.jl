@@ -136,6 +136,9 @@ function preprocess(doc::AbstractString)
     # KaTeX doesn't support `\DeclareMathOperator`, so use `\operatorname` instead.
     doc = replace(doc, r"\\DeclareMathOperator{(\\.+)}{(.+)}" => s"\\newcommand{\1}{\\operatorname{\2}}")
 
+    # Use Cref instead of eqref for now
+    doc = replace(doc, r"\\eqref" => s"\\Cref")
+
     return doc
 end
 # The big build function
@@ -230,7 +233,7 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
                         "RawInline" => resolver, 
                         # use relative image path for html
                         "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
-                        "Math" => KaTeXFilter
+                        "Math" => thmfilter # calls KaTeXMath internally
                         ))]
                     AST_filter!(raw_web_json, julia_filters_html, format="html");
                     @debug "Starting `resolve_math!`"

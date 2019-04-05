@@ -10,3 +10,9 @@ doc = raw"""
 """
 
 doc2 =replace(doc, r"\\DeclareMathOperator{(\\.+)}{(.+)}" => s"\\newcommand{\1}{\\operatorname{\2}}")
+
+m = raw"""
+x^2 = 5 \label{eq:test}
+"""
+
+out = match(r"\\label{(eq\:.+)}", m)
