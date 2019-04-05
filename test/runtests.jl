@@ -21,7 +21,7 @@ end
 
 using Test
 
-G = build(@__DIR__, targets = [WEB_AST])
+G = build(@__DIR__, targets = [WEB])
 
 include("plot_dag.jl")
-plot_dag!(G, targets = [WEB_AST])
+plot_dag!(G, targets = [WEB])

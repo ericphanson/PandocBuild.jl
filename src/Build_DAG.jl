@@ -63,12 +63,18 @@ function get_do_list(G, make_list, targets)
     end
     return do_list
 end
-
+function walk!(do_edges, v, G)
+    nhbrs = inneighbors(G, v)
+    union!(do_edges, [Edge( n => v) for n in nhbrs] )
+    foreach(nhbrs) do n
+        walk!(do_edges, n, G)
+    end
+end
 function get_edge_list(G, targets)
     source_node = G[RAW_JSON, :name]
-    do_edges = Set(Any[])
+    do_edges = Set(Edge[])
     for tar in targets
-        union!(do_edges, a_star(G, source_node, G[tar, :name]))
+        walk!(do_edges, G[tar, :name], G)
     end
     return do_edges
 end
