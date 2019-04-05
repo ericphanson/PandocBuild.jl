@@ -69,19 +69,10 @@ function thmfilter(tag, content, meta, format)
         current_count =  envs[(longname, LONG), COUNT]
         envs[(longname, LONG), DATA][id] = current_count
 
-        # Something is wrong: "\tag{$current_count}" should render a tab from the \t, but
-        # if I put \\tag, then the double \ is passed to node which treats it as two \'s.
         mathstr = replace(mathstr, r"\\label{(eq\:.+)}" => "\\tag{$current_count}", count=1)
         mathstr = replace(mathstr, r"\n" => "") # maybe doesn't matter
-        @show mathstr
-        @show mathtype_dict
-        content = Any[mathtype_dict, mathstr]
-        path = joinpath(nodepath, "parsemath.js")
 
-        out = communicate(Cmd(`$(nodejs_cmd()) $path`; dir=nodepath), input = JSON.json([(mathstr, true)])).stdout 
-        out = out |> JSON.parse
-        @show out
-
+        content = Any[mathtype_dict, mathstr] # send back the updated updated mathstr
         return KaTeXFilter(tag, content, format, meta)
     end
     return nothing
