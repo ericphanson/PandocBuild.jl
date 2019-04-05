@@ -156,6 +156,17 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if !isfile(katex_outputs)
             cp(katex_deps,  katex_outputs)
         end
+
+        fonts_deps = joinpath(deps, "fonts")
+        fonts_dir = joinpath(dir, "fonts")
+        fonts_outputs = joinpath(outputs, "fonts")
+
+        if !isdir(fonts_dir)
+            cp(fonts_deps, fonts_dir)
+        end
+        if !isdir(fonts_outputs)
+            cp(fonts_deps,  fonts_outputs)
+        end 
     end
 
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)

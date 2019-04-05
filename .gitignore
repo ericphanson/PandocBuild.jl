@@ -5,3 +5,4 @@ deps/build.log
 Manifest.toml
 test/outputs/*
 test/katex.min.css
+deps/fonts
