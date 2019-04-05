@@ -1,4 +1,4 @@
-@enum InternalResources RAW_JSON FILT_TEX_JSON FILT_WEB_JSON TEX_AUX_PATH TEX_FILE_PATH PARSE_TEX_LOG
+@enum InternalResources RAW_STR PROC_STR RAW_JSON FILT_TEX_JSON FILT_WEB_JSON TEX_AUX_PATH TEX_FILE_PATH PARSE_TEX_LOG
 
 const Resources = Union{InternalResources, BuildTargets}
 

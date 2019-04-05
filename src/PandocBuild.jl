@@ -123,7 +123,21 @@ function normalize_targets(targets, openpdf)
     return targets
 end
 
+"""
+    preprocess(doc::AbstractString)
 
+Apply some preprocessing steps to the markdown file. Currently:
+
+  *  Replaces `\\DeclareMathOperator{\\x}{y}` commands by `\\newcommand{\\x}{\\operatorname{y}}` 
+
+"""
+function preprocess(doc::AbstractString)
+
+    # KaTeX doesn't support `\DeclareMathOperator`, so use `\operatorname` instead.
+    doc = replace(doc, r"\\DeclareMathOperator{(\\.+)}{(.+)}" => s"\\newcommand{\1}{\\operatorname{\2}}")
+
+    return doc
+end
 # The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
@@ -350,14 +364,24 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     end
     reset_channel_dict!()
 
-    # Start getting the AST right away
-    start_make(Make("Get AST from pandoc", inputs = [], outputs = [RAW_JSON]) do inputs
-        pandoc_from = reduce(*, markdown_extensions; init="markdown")
+    initial_make_list = [
+        Make("Load file into Julia", inputs = [], outputs = [RAW_STR], throw=true) do inputs
+            [read("$src/$filename.md", String)]
+        end,
+        Make("Preprocess file", inputs = [RAW_STR], outputs = [PROC_STR], throw=true) do inputs
+            [preprocess(inputs[])]
+        end,
+        # Start getting the AST right away
+        Make("Get AST from pandoc", inputs = [PROC_STR], outputs = [RAW_JSON], throw=true) do inputs
+            pandoc_from = reduce(*, markdown_extensions; init="markdown")
 
-        out = communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
-        
-        [JSON.parse(out.stdout)]
-    end, ChannelDict)
+            out = communicate(`pandoc -f $pandoc_from -t json`; input = inputs[])
+            
+            [JSON.parse(out.stdout)]
+        end
+        ]
+    
+    start_make.(initial_make_list, Ref(ChannelDict))
     
 
     G, build_dag_time, _ = @timed build_DAG(make_list)
