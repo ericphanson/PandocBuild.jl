@@ -1,4 +1,5 @@
-using NodeJS
+using NodeJS, Parameters
+
 
 const nodepath = normpath(joinpath(@__DIR__, "..","..", "deps/"))
 
@@ -6,7 +7,7 @@ struct ResolveKaTeX
     mathstr :: String
     display :: Bool
 end
-const math_resolve_dict = Dict{Tuple{String, Bool}, Union{Nothing, String}}();
+const math_resolve_dict = Dict{Tuple{String, Bool}, Union{Nothing, NamedTuple{(:rendered_str, :katex_error),Tuple{String,Union{String, Nothing}}}}}();
 
 const to_resolve = Tuple{String, Bool}[];
 
@@ -16,7 +17,10 @@ function JSON.lower(R::ResolveKaTeX)::String
             @error "Math wasn't resolved!" R val
             return ""
     end
-    return val 
+    @unpack rendered_str, katex_error = val
+    isnothing(katex_error) || @warn("KaTeX error", katex_error)
+
+    return rendered_str 
 end
 
 function resolve_math!()
@@ -30,11 +34,12 @@ function resolve_math!()
         for j = eachindex(to_resolve)
         @debug "at index $j" to_resolve[j]
         katex_error = out[j]["error"]
-        if katex_error != ""
-            @warn "KaTeX error" katex_error
-        end
         rendered_str = out[j]["render"]
-        math_resolve_dict[to_resolve[j]] = rendered_str
+        if katex_error != ""
+            math_resolve_dict[to_resolve[j]] = (rendered_str = rendered_str, katex_error = katex_error)
+        else
+            math_resolve_dict[to_resolve[j]] = (rendered_str = rendered_str, katex_error = nothing)
+        end
     end
     catch E
         @error E
@@ -51,7 +56,7 @@ Remove unicode characters (via `to_latex`), then render to KaTeX via node.
 
     katex_math(content) -> RawInline
 """
-function katex_math(mathstr, display)
+function katex_math(mathstr::AbstractString, display::Bool)
     global math_resolve_dict
     if !haskey(math_resolve_dict,  (mathstr, display))
         push!(to_resolve, (mathstr, display))
@@ -59,7 +64,11 @@ function katex_math(mathstr, display)
     end
 
     val = math_resolve_dict[(mathstr, display)]
-    isnothing(val) ? ResolveKaTeX(mathstr, display) : val
+    isnothing(val) && return ResolveKaTeX(mathstr, display)
+
+    @unpack rendered_str, katex_error = val
+    isnothing(katex_error) || @warn("KaTeX error", katex_error)
+    rendered_str
 end
 
 
