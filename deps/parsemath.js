@@ -8,7 +8,8 @@ function render(pair)
     var str;
     var errmsg;
     try {
-        str = katex.renderToString(pair[0], {"display": pair[1]});
+
+        str = katex.renderToString(pair[0], {"displayMode": pair[1]});
         errmsg = "";
        } catch(error) {
            if (pair[1] === true)
