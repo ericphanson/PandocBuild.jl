@@ -1,7 +1,9 @@
 module PandocBuild
 
 # build and possible build targets
-export build, watch, WEB, TEX, PDF, AST, MD, ALL, SLIDES
+export build, watch,    WEB, WEB_AST, WEB_MD, WEB_SLIDES,
+                        TEX, PDF, TEX_AST, TEX_MD, TEX_SLIDES,
+                        ALL
 
 # Proccess and logging
 using Logging
@@ -36,16 +38,11 @@ function communicate(cmd::Cmd; input = nothing)
     end
 
     close(inp)
-    @debug "The process" process
-    
-    @debug "after sleeping $(isnothing(sleep(1)))"  process
 
     wait(process)
     @debug "after waiting" process
-    @debug "the process's stdin and stdout are" sout serr
     so = fetch(sout)
     se = fetch(serr)
-    @debug "these have been fetched" so se
     code = process.exitcode
 
     code == 0 || begin
@@ -79,33 +76,6 @@ function get_file(file)
     file
 end
 
-const strict = Ref(false)
-macro timed_task(name, expr)
-    quote
-        local n = $(esc(name))
-        try
-            local val, t, _ = Base.@timed $(esc(expr))
-            @info "$n finished ($(round(t,digits=3))s)"
-            val
-        catch E
-            @error "$n failed" exception=E
-            if strict[]
-                rethrow(E)
-            end
-            E
-        end
-    end
-end
-
-macro timed_task_throw(name, expr)
-    quote
-        local n = $(esc(name))
-        local val, t, _ = Base.@timed $(esc(expr))
-        @info "$n finished ($(round(t,digits=3))s)"
-        val
-    end
-end
-
 # Filters
 
 using PandocFilters, JSON
@@ -133,7 +103,9 @@ end
 
 # Build targets
 
-@enum BuildTargets WEB TEX PDF AST MD ALL SLIDES
+@enum BuildTargets WEB WEB_AST WEB_MD WEB_SLIDES TEX PDF TEX_AST TEX_MD TEX_SLIDES ALL OPEN_PDF
+
+include("Build_DAG.jl")
 
 function normalize_targets(targets, openpdf)
     if targets isa AbstractSet
@@ -143,43 +115,37 @@ function normalize_targets(targets, openpdf)
     else
         targets = Set([targets])
     end
-
+ 
     eltype(targets) == BuildTargets || throw(ArgumentError("targets must be a single BuiltTargets or a vector or set thereof"))
-
-    if ALL in targets
-         union!(targets, Set(instances(BuildTargets)))
-    end
-
     if openpdf
-        push!(targets, PDF)
+        push!(targets, OPEN_PDF)
     end
-
-    if PDF in targets
-        push!(targets, TEX)
-    end
-
-    needTEX = (TEX in targets);
-    if WEB in targets || SLIDES in targets || MD in targets
-        needHTML = true;
-    else
-        needHTML = false;
-    end
-    return targets, needTEX, needHTML
+    return targets
 end
 
 
 # The big build function
 
 function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
-    targets, needTEX, needHTML = normalize_targets(targets, openpdf)
+    targets = normalize_targets(targets, openpdf)
+    
+    if isempty(targets)
+        throw(ArgumentError("No build targets; exiting."))
+        return false
+    end
 
     pdf_viewer = "/Applications/Skim.app/Contents/MacOS/Skim"
     src = get_dir("src"; basedir=dir)
     deps = normpath(joinpath(@__DIR__, "..", "deps"))
     outputs = get_dir("outputs"; create=true, basedir=dir)
 
-    if needHTML
+    markdown_extensions = [
+        "+fenced_divs",
+        "+backtick_code_blocks",
+        "+tex_math_single_backslash"
+        ]
 
+    function ensure_katex_css()
         katex_deps = joinpath(deps, "katex.min.css")
         katex_dir = joinpath(dir, "katex.min.css")
         katex_outputs = joinpath(outputs, "katex.min.css")
@@ -190,52 +156,10 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
         if !isfile(katex_outputs)
             cp(katex_deps,  katex_outputs)
         end
-
-    end
-
-    if SLIDES in targets
-        revealjs_deps = joinpath(deps, "reveal.js")
-        revealjs_dir = joinpath(dir, "reveal.js")
-        revealjs_outputs = joinpath(outputs, "reveal.js")
-
-        if !isdir(revealjs_dir)
-            cp(revealjs_deps, revealjs_dir)
-        end
-        if !isdir(revealjs_outputs)
-            cp(revealjs_deps,  revealjs_outputs)
-        end
-    end
-
-    if needTEX
-        tex_aux = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
-        tex_file = joinpath(tex_aux, "$filename.tex")
     end
 
     imgdir = get_dir(joinpath("outputs","images"); create=true, basedir=dir)
-
-    # We've done a bit of work (see the `Envs.jl` file) so that both for latex and HTML, we only need to walk the AST once to run all our filters, using this `makeStagedFilter` function.
-    julia_filters_latex =   [ makeStagedFilter(Dict(
-                                    "Math" => unicode_to_latex,
-                                    "RawBlock" => (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
-                                    )), 
-                            ]
-  
-    julia_filters_html = [ makeStagedFilter(Dict(
-                        "Div" => thmfilter, 
-                        "RawInline" => resolver, 
-                        # use relative image path for html
-                        "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
-                        "Math" => KaTeXFilter
-                        ))]
                
-    markdown_extensions = [
-                "+fenced_divs",
-                "+backtick_code_blocks",
-                "+tex_math_single_backslash"
-                ]
-
-    pandoc_from = reduce(*, markdown_extensions; init="markdown")
-
     skim_script = string(raw"""EOF
                         tell application "Skim"
                         activate
@@ -247,153 +171,206 @@ function build(dir; filename="thesis", targets = Set([WEB]), openpdf = false)
     
                         
     reset!(envs) # sneaky reset for the environment numbering (see Filters/Envs.jl)
-    pandoc_latex = Channel(1)
-    pandoc_html = Channel(1)
-    t = @elapsed @sync begin
 
-        out, pandoc_time, _ = @timed communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
-        @info  "Getting AST from pandoc finished ($(round(pandoc_time,digits=3))s)"
-        pandoc_AST_latex = JSON.parse(out.stdout);
 
-        # only copy if we really need 2
-        if needTEX
-            # is deepcopy the fastest way to do this? Is it better to make a non-mutating version of `AST_filter!` and use that?
-            pandoc_AST_html = deepcopy(pandoc_AST_latex)
-        else
-            pandoc_AST_html = pandoc_AST_latex
-        end
 
-        if needTEX
-            @async begin   
-                @timed_task_throw "latex filters" begin
-                    AST_filter!(pandoc_AST_latex, julia_filters_latex, format="latex");
-                    put!(pandoc_latex, JSON.json(pandoc_AST_latex))
-                end
-            end
-        end
+    all_targets = [ tar for tar in instances(BuildTargets) if (tar !=  ALL) && (tar != OPEN_PDF)]
+    if openpdf
+        push!(all_targets, OPEN_PDF)
+    end
 
-        if needHTML
-            @async begin
-                @timed_task_throw "html filters" begin
-                    AST_filter!(pandoc_AST_html, julia_filters_html, format="html");
+    
+    make_list = [
+        Make("filter tex", 
+                inputs = [RAW_JSON], 
+                outputs = [FILT_TEX_JSON], 
+                throw=true) do inputs
+                    raw_json = inputs[]
+                    raw_tex_json = deepcopy(raw_json)
+                    julia_filters_latex =  [ makeStagedFilter(Dict(
+                        "Math" => unicode_to_latex,
+                        "RawBlock" => (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir)
+                        )) ]
+                    AST_filter!(raw_tex_json, julia_filters_latex, format="latex");
+                    [JSON.json(raw_tex_json)]
+                end,
+        Make("filter web",
+                inputs = [RAW_JSON],
+                outputs = [FILT_WEB_JSON],
+                throw = true) do inputs
+                    raw_json = inputs[]
+                    raw_web_json = deepcopy(raw_json)
+                    julia_filters_html = [ makeStagedFilter(Dict(
+                        "Div" => thmfilter, 
+                        "RawInline" => resolver, 
+                        # use relative image path for html
+                        "RawBlock" =>  (tag, content, format, meta) -> tikzfilter(tag, content, format, meta, imgdir, "images"),
+                        "Math" => KaTeXFilter
+                        ))]
+                    AST_filter!(raw_web_json, julia_filters_html, format="html");
                     @debug "Starting `resolve_math!`"
                     resolve_math!()
                     @debug "Finished `resolve_math!`"
-
-                    @debug "Starting JSON.json(pandoc_AST_html)"
-                    pandoc_AST_html_string = JSON.json(pandoc_AST_html)
-                    @debug "Done JSON.json(pandoc_AST_html)"
-                    put!(pandoc_html, pandoc_AST_html_string)
-                end
-            end
-        end
-
-        if AST in targets
-            @async let
-                @timed_task "write json" begin
-                    if needTEX
-                        open("$outputs/$(filename)_latex.json", "w") do f
-                            print(f, fetch(pandoc_latex))
-                        end
+                    @debug "Starting JSON.json(raw_web_json)"
+                    [JSON.json(raw_web_json)]
+                end,
+        Make("write web AST",
+                inputs = [FILT_WEB_JSON],
+                outputs = [WEB_AST]) do inputs
+                    filt_web_json = inputs[]
+                    open("$outputs/$(filename)_html.json", "w") do f
+                        print(f, filt_web_json)
                     end
-                    if needHTML
-                        open("$outputs/$(filename)_html.json", "w") do f
-                            print(f, fetch(pandoc_html))
-                        end
+                    true
+                end,
+        Make("write tex AST",
+                inputs = [FILT_TEX_JSON],
+                outputs = [TEX_AST]) do inputs
+                    filt_tex_json = inputs[]
+                    open("$outputs/$(filename)_latex.json", "w") do f
+                        print(f, filt_tex_json)
                     end
-                end
-            end
-        end
-
-        if SLIDES in targets
-            isdir(joinpath(outputs, "reveal.js")) || throw(error("reveal.js must be in outputs"))
-            mkslides = @async let
-                @timed_task "slides" begin
-                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind2 --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
-                end
-            end
-
-        end
-        if TEX in targets
-            mktex = @async let
-                        @timed_task "tex" begin
-                        if SLIDES in targets
-                            communicate(`pandoc -f json -s -t beamer -o $tex_file`; input = fetch(pandoc_latex))
-                        else
-                            communicate(`pandoc -f json -s -t latex -o $tex_file`; input = fetch(pandoc_latex))
-                        end
-                        end
+                    true
+                end,
+        Make("Write revealjs slides",
+                inputs = [FILT_WEB_JSON],
+                outputs = [WEB_SLIDES]) do inputs
+                    filt_web_json = inputs[]
+                    revealjs_deps = joinpath(deps, "reveal.js")
+                    revealjs_dir = joinpath(dir, "reveal.js")
+                    revealjs_outputs = joinpath(outputs, "reveal.js")
+            
+                    if !isdir(revealjs_dir)
+                        cp(revealjs_deps, revealjs_dir)
                     end
-        end
-       
-        if MD in targets
-            mkdown = @async let
-                        @timed_task "markdown" begin
-                            communicate(`pandoc -f json -s -t markdown -o $outputs/$filename.md`; input = fetch(pandoc_html))
-                        end
+                    if !isdir(revealjs_outputs)
+                        cp(revealjs_deps,  revealjs_outputs)
                     end
-        end
 
+                    ensure_katex_css()
 
-        if WEB in targets
-            mkhtml = @async let
-                    @timed_task "html" begin
-                    # would prefer $katexcss but that messes up relative paths for local webserver
-                    communicate(`pandoc -f json -s  -t html --css=katex.min.css -o $outputs/$filename.html`; input = fetch(pandoc_html))
+                    communicate(`pandoc -f json -s -t revealjs -V theme=sunblind --css=katex.min.css -o $outputs/$filename.html`; input = filt_web_json)
+                    true
+            end,
+        Make("Write tex file",
+                inputs = [FILT_TEX_JSON],
+                outputs = [TEX, TEX_AUX_PATH, TEX_FILE_PATH]) do inputs
+                    filt_tex_json = inputs[]
+                    tex_aux_path = get_dir(joinpath("outputs","tex_aux"); create=true, basedir=dir)
+                    tex_file_path = joinpath(tex_aux_path, "$filename.tex")
+
+                    if TEX_SLIDES in targets
+                        communicate(`pandoc -f json -s -t beamer -o $tex_file_path`; input = filt_tex_json)
+                    else
+                        communicate(`pandoc -f json -s -t latex -o $tex_file_path`; input = filt_tex_json)
                     end
-                end
-        end
-
-        if PDF in targets
-            mkpdf = @async let
-                        wait(mktex)
-                        wait.(tikz_tasks)
-                        @timed_task "pdf" begin
-                            run(pipeline(`latexmk $tex_file -pdf -cd -silent`, stdout=devnull, stderr=devnull))
-                            cp(joinpath(tex_aux, "$filename.pdf"), joinpath(outputs, "$filename.pdf"); force=true)
-                        end 
-                    end
-        
-            checkerrors = @async let
-                        wait(mkpdf)
-                            @timed_task "rubber-info" begin
-                                # careful: cd changes global state for other tasks.
-                                # (https://stackoverflow.com/questions/44571713/julia-language-state-in-async-tasks-current-directory)
-                                # since this waits for mkpdf, it runs basically after everything else
-                                # so it's probably fine, but maybe this should be changed.
-                                rubber_out = cd(tex_aux) do
-                                        read(`rubber-info $(relpath(tex_file))`, String)
+                    return [true, tex_aux_path, tex_file_path]
+                end,
+        Make("Write TEX_MD",
+                inputs = [FILT_TEX_JSON],
+                outputs = [TEX_MD]) do inputs
+                    filt_tex_json = inputs[]
+                    communicate(`pandoc -f json -s -t markdown -o $outputs/tex_$filename.md`; input = filt_tex_json)
+                    true
+                end,
+        Make("Write WEB_MD",
+                inputs = [FILT_WEB_JSON],
+                outputs = [WEB_MD]) do inputs
+                    filt_web_json = inputs[]
+                    communicate(`pandoc -f json -s -t markdown -o $outputs/web_$filename.md`; input = filt_web_json)
+                    true
+                end,
+        Make("Write html",
+                inputs = [FILT_WEB_JSON],
+                outputs = [WEB]) do inputs
+                filt_web_json = inputs[]
+                ensure_katex_css()
+                # would prefer $katexcss but that messes up relative paths for local webserver
+                communicate(`pandoc -f json -s  -t html --css=katex.min.css -o $outputs/$filename.html`; input = filt_web_json)
+                true
+                end,
+        Make("Write PDF",
+                inputs = [TEX, TEX_AUX_PATH, TEX_FILE_PATH],
+                outputs = [PDF]) do inputs
+                    _, tex_aux_path, tex_file_path = inputs
+                    wait.(tikz_tasks)
+                    run(pipeline(`latexmk $tex_file_path -pdf -cd -silent`, stdout=devnull, stderr=devnull))
+                    cp(joinpath(tex_aux_path, "$filename.pdf"), joinpath(outputs, "$filename.pdf"); force=true)
+                true
+                end,
+        Make("Parse tex log",
+                inputs = [PDF, TEX_FILE_PATH, TEX_AUX_PATH],
+                outputs = [PARSE_TEX_LOG]) do inputs
+                    _, tex_file_path, tex_aux_path = inputs
+                     # careful: cd changes global state for other tasks.
+                    # (https://stackoverflow.com/questions/44571713/julia-language-state-in-async-tasks-current-directory)
+                    # since this waits for mkpdf, it runs basically after everything else
+                    # so it's probably fine, but maybe this should be changed.
+                    rubber_out = cd(tex_aux_path) do
+                                read(`rubber-info $(relpath(tex_file_path))`, String)
                                 end
-                                for line in split(rubber_out, "\n")
-                                    if line != ""
-                                        @info line
-                                        # write(stdout, "[rubber-info]: " * line * "\n")
-                                    end
-                                end
-                            end
-            end
-        end
-
-        if openpdf && (PDF in targets)
-        do_openpdf = @async let
-                    wait(mkpdf)
-                    @timed_task "open pdf" run(pipeline(pipeline(`echo $skim_script`, `osascript`), stdout=devnull))
+                    for line in split(rubber_out, "\n")
+                        if line != ""
+                            @info line
+                        end
+                    end
+                    true
+                    end,
+            Make("open PDF", inputs = [PDF], outputs =[OPEN_PDF]) do inputs
+                if openpdf
+                    run(pipeline(pipeline(`echo $skim_script`, `osascript`), stdout=devnull))
                 end
+                openpdf
+            end,
+            Make("all", inputs = all_targets, outputs = [ALL]) do inputs
+                true
+            end,
+    ]
+
+    ChannelDict = Dict{Resources, Any}()
+
+    function reset_channel_dict!()
+        for j in instances(InternalResources)
+            ChannelDict[j] = Channel(1)
         end
-
-
-        @info "Launched tasks"
+        for j in instances(BuildTargets)
+            ChannelDict[j] = Channel(1)
+        end
     end
+    reset_channel_dict!()
+
+    # Start getting the AST right away
+    start_make(Make("Get AST from pandoc", inputs = [], outputs = [RAW_JSON]) do inputs
+        pandoc_from = reduce(*, markdown_extensions; init="markdown")
+
+        out = communicate(`pandoc $src/$filename.md -f $pandoc_from -t json`)
+        
+        [JSON.parse(out.stdout)]
+    end, ChannelDict)
+    
+
+    G, build_dag_time, _ = @timed build_DAG(make_list)
+    @info  "Building DAG took ($(round(build_dag_time,digits=3))s)"
+
+    do_list, build_do_list_time, _ = @timed get_do_list(G, make_list, targets)
+    @info  "Choosing optimal path through DAG took ($(round(build_do_list_time,digits=3))s)"
+
+   
+
+    @debug "Starting do_list"
+
+    task_list = start_make.(do_list, Ref(ChannelDict))
+    @debug "constructed task_list" task_list
+    t = @elapsed wait.(task_list)
+
+    @debug "waiting for tikz_tasks"
     wait.(tikz_tasks)
     empty!(tikz_tasks)
-    if needTEX
-        take!(pandoc_latex)
-    end
-    if needHTML
-        take!(pandoc_html)
-    end
-    @info "Finished all tasks ($(round(t,digits=3))s)"
 
+    reset_channel_dict!()
+
+    @info "Finished all tasks ($(round(t,digits=3))s)"
+    return G
 end
 
 

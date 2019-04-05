@@ -23,11 +23,9 @@ function resolve_math!()
     isempty(to_resolve) && return nothing
     path = joinpath(nodepath, "parsemath.js")
     @debug "Started katex"
-    @debug to_resolve
     out = communicate(Cmd(`$(nodejs_cmd()) $path`; dir=nodepath), input = JSON.json(to_resolve)).stdout 
     @debug "KaTeX returned"
     out = out |> JSON.parse
-    @debug out
     try
         for j = eachindex(to_resolve)
         @debug "at index $j" to_resolve[j]
